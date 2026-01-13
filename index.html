@@ -1,0 +1,882 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Green Screen Video - Transparent Background</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        html, body {
+            height: 100%;
+            overflow: hidden;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            height: 100vh;
+            max-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+            box-sizing: border-box;
+        }
+
+        .container {
+            background: white;
+            border-radius: 12px;
+            padding: 30px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            max-width: 1400px;
+            width: 100%;
+            max-height: calc(100vh - 40px);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        h1 {
+            text-align: center;
+            color: #333;
+            margin-bottom: 20px;
+            flex-shrink: 0;
+        }
+
+        .main-content {
+            display: flex;
+            gap: 20px;
+            align-items: flex-start;
+            flex: 1;
+            min-height: 0;
+            overflow: hidden;
+        }
+
+        .video-section {
+            width: auto;
+            min-width: 0;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            flex-shrink: 0;
+        }
+
+        .video-controls {
+            display: flex;
+            gap: 10px;
+            margin-top: 15px;
+            justify-content: center;
+            flex-wrap: wrap;
+            flex-shrink: 0;
+        }
+
+        .video-controls button {
+            width: auto;
+            min-width: 120px;
+        }
+
+        .video-controls .file-input-label {
+            width: auto;
+            min-width: 150px;
+        }
+
+        .video-container {
+            position: relative;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            background: 
+                linear-gradient(45deg, #ccc 25%, transparent 25%),
+                linear-gradient(-45deg, #ccc 25%, transparent 25%),
+                linear-gradient(45deg, transparent 75%, #ccc 75%),
+                linear-gradient(-45deg, transparent 75%, #ccc 75%);
+            background-size: 20px 20px;
+            background-position: 0 0, 0 10px, 10px -10px, -10px 0px;
+            border-radius: 8px;
+            overflow: hidden;
+        }
+
+        #videoCanvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+        }
+
+        .controls-section {
+            width: 30%;
+            flex-shrink: 0;
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+            overflow-y: auto;
+            max-height: 100%;
+            padding-right: 10px;
+        }
+
+        .controls-section::-webkit-scrollbar {
+            width: 8px;
+        }
+
+        .controls-section::-webkit-scrollbar-track {
+            background: #f1f1f1;
+            border-radius: 4px;
+        }
+
+        .controls-section::-webkit-scrollbar-thumb {
+            background: #ccc;
+            border-radius: 4px;
+        }
+
+        .controls-section::-webkit-scrollbar-thumb:hover {
+            background: #999;
+        }
+
+        .controls {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        button {
+            padding: 12px 24px;
+            font-size: 16px;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            background: #667eea;
+            color: white;
+            font-weight: 600;
+            transition: all 0.3s ease;
+            width: 100%;
+        }
+
+        button:hover {
+            background: #5568d3;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+        }
+
+        button:active {
+            transform: translateY(0);
+        }
+
+        button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        button.active {
+            background: #ff6b6b;
+            box-shadow: 0 0 0 3px rgba(255, 107, 107, 0.3);
+        }
+
+        button.active:hover {
+            background: #ee5a5a;
+        }
+
+        #videoCanvas.picker-mode {
+            cursor: crosshair;
+        }
+
+        .selected-color-display {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-top: 0;
+            padding: 15px;
+            background: #fff;
+            border-radius: 6px;
+            border: 2px solid #667eea;
+        }
+
+        .color-preview {
+            width: 50px;
+            height: 50px;
+            border-radius: 6px;
+            border: 2px solid #ddd;
+            background: #000;
+        }
+
+        .color-info {
+            flex: 1;
+        }
+
+        .color-info strong {
+            display: block;
+            margin-bottom: 5px;
+            color: #333;
+        }
+
+        .color-info small {
+            color: #666;
+        }
+
+        .settings {
+            background: #f5f5f5;
+            border-radius: 8px;
+            padding: 20px;
+            margin-top: 0;
+        }
+
+        .settings h3 {
+            margin-bottom: 15px;
+            color: #333;
+        }
+
+        .setting-group {
+            margin-bottom: 15px;
+        }
+
+        .setting-group label {
+            display: block;
+            margin-bottom: 5px;
+            color: #666;
+            font-weight: 500;
+        }
+
+        .setting-group input[type="range"] {
+            width: 100%;
+            margin-bottom: 5px;
+        }
+
+        .setting-group .value {
+            color: #667eea;
+            font-weight: 600;
+        }
+
+        #videoInput {
+            display: none;
+        }
+
+        .file-input-label {
+            display: block;
+            padding: 12px 24px;
+            background: #28a745;
+            color: white;
+            border-radius: 6px;
+            cursor: pointer;
+            font-weight: 600;
+            transition: all 0.3s ease;
+            text-align: center;
+            width: 100%;
+        }
+
+        .file-input-label:hover {
+            background: #218838;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(40, 167, 69, 0.4);
+        }
+
+        @media (max-width: 1024px) {
+            .main-content {
+                flex-direction: column;
+            }
+
+            .video-section {
+                width: 100%;
+            }
+
+            .controls-section {
+                width: 100%;
+            }
+
+            .seek-bar-wrapper {
+                flex-direction: row;
+            }
+        }
+
+        .seek-container {
+            margin: 0;
+            padding: 0;
+            flex-shrink: 0;
+        }
+
+        .seek-bar-wrapper {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            flex-direction: column;
+        }
+
+        .seek-bar-wrapper.horizontal {
+            flex-direction: row;
+        }
+
+        .time-display {
+            font-size: 14px;
+            color: #666;
+            font-weight: 500;
+            min-width: 60px;
+            text-align: center;
+        }
+
+        #seekBar {
+            width: 100%;
+            height: 8px;
+            border-radius: 4px;
+            background: #e0e0e0;
+            outline: none;
+            cursor: pointer;
+            -webkit-appearance: none;
+        }
+
+        #seekBar::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 18px;
+            height: 18px;
+            border-radius: 50%;
+            background: #667eea;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        #seekBar::-webkit-slider-thumb:hover {
+            background: #5568d3;
+            transform: scale(1.2);
+        }
+
+        #seekBar::-moz-range-thumb {
+            width: 18px;
+            height: 18px;
+            border-radius: 50%;
+            background: #667eea;
+            cursor: pointer;
+            border: none;
+            transition: all 0.2s ease;
+        }
+
+        #seekBar::-moz-range-thumb:hover {
+            background: #5568d3;
+            transform: scale(1.2);
+        }
+
+        button.repeat-active {
+            background: #ff6b6b;
+        }
+
+        button.repeat-active:hover {
+            background: #ee5a5a;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🎬 Green Screen Video Player</h1>
+        
+        <div class="main-content">
+            <div class="video-section">
+                <div class="video-container">
+                    <canvas id="videoCanvas"></canvas>
+                </div>
+                
+                <div class="seek-container">
+                    <div class="seek-bar-wrapper horizontal">
+                        <span class="time-display" id="currentTime">0:00</span>
+                        <input type="range" id="seekBar" min="0" max="100" value="0" step="0.1">
+                        <span class="time-display" id="duration">0:00</span>
+                    </div>
+                </div>
+
+                <div class="video-controls">
+                    <label for="videoInput" class="file-input-label">
+                        📁 Choose Video File
+                    </label>
+                    <input type="file" id="videoInput" accept="video/*">
+                    <button id="playPauseBtn">▶️ Play</button>
+                    <button id="repeatBtn">🔁 Repeat</button>
+                </div>
+            </div>
+
+            <div class="controls-section">
+                <div class="controls">
+                    <button id="colorPickerBtn">🎨 Pick Color</button>
+                </div>
+
+                <div class="settings">
+            <h3>Chroma Key Settings</h3>
+            
+            <div class="setting-group">
+                <label>Color Threshold: <span class="value" id="thresholdValue">0.3</span></label>
+                <input type="range" id="threshold" min="0" max="1" step="0.01" value="0.3">
+                <small>Adjust how sensitive the color detection is (lower = more strict)</small>
+            </div>
+
+            <div class="setting-group">
+                <label>Saturation Threshold: <span class="value" id="saturationValue">0.4</span></label>
+                <input type="range" id="saturation" min="0" max="1" step="0.01" value="0.4">
+                <small>Minimum saturation for color detection (only used when no color is selected)</small>
+            </div>
+
+            <div class="setting-group">
+                <label>Smoothness: <span class="value" id="smoothnessValue">0.2</span></label>
+                <input type="range" id="smoothness" min="0" max="1" step="0.01" value="0.2">
+                <small>Edge smoothing for better blending</small>
+                </div>
+
+                <div id="selectedColorDisplay" class="selected-color-display" style="display: none;">
+                    <div class="color-preview" id="colorPreview"></div>
+                    <div class="color-info">
+                        <strong>Selected Color to Remove:</strong>
+                        <small id="colorInfo">Click the color picker button, then click on the video to select a color.</small>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const videoInput = document.getElementById('videoInput');
+        const videoCanvas = document.getElementById('videoCanvas');
+        const ctx = videoCanvas.getContext('2d', { willReadFrequently: true });
+        const playPauseBtn = document.getElementById('playPauseBtn');
+        const repeatBtn = document.getElementById('repeatBtn');
+        const colorPickerBtn = document.getElementById('colorPickerBtn');
+        const selectedColorDisplay = document.getElementById('selectedColorDisplay');
+        const colorPreview = document.getElementById('colorPreview');
+        const colorInfo = document.getElementById('colorInfo');
+        const seekBar = document.getElementById('seekBar');
+        const currentTimeDisplay = document.getElementById('currentTime');
+        const durationDisplay = document.getElementById('duration');
+        
+        const thresholdSlider = document.getElementById('threshold');
+        const saturationSlider = document.getElementById('saturation');
+        const smoothnessSlider = document.getElementById('smoothness');
+        const thresholdValue = document.getElementById('thresholdValue');
+        const saturationValue = document.getElementById('saturationValue');
+        const smoothnessValue = document.getElementById('smoothnessValue');
+
+        let video = document.createElement('video');
+        let animationFrameId = null;
+        let isPlaying = false;
+        let isPickerMode = false;
+        let targetColor = null; // { r, g, b } - the color to remove
+        let isRepeating = false;
+        let isSeeking = false;
+
+        // Settings
+        let settings = {
+            threshold: 0.3,
+            saturation: 0.4,
+            smoothness: 0.2
+        };
+
+        // Update display values
+        thresholdSlider.addEventListener('input', (e) => {
+            settings.threshold = parseFloat(e.target.value);
+            thresholdValue.textContent = settings.threshold.toFixed(2);
+            redrawFrame(); // Apply changes immediately
+        });
+
+        saturationSlider.addEventListener('input', (e) => {
+            settings.saturation = parseFloat(e.target.value);
+            saturationValue.textContent = settings.saturation.toFixed(2);
+            redrawFrame(); // Apply changes immediately
+        });
+
+        smoothnessSlider.addEventListener('input', (e) => {
+            settings.smoothness = parseFloat(e.target.value);
+            smoothnessValue.textContent = settings.smoothness.toFixed(2);
+            redrawFrame(); // Apply changes immediately
+        });
+
+        // Convert RGB to HSV
+        function rgbToHsv(r, g, b) {
+            r /= 255;
+            g /= 255;
+            b /= 255;
+
+            const max = Math.max(r, g, b);
+            const min = Math.min(r, g, b);
+            const diff = max - min;
+
+            let h = 0;
+            if (diff !== 0) {
+                if (max === r) {
+                    h = ((g - b) / diff) % 6;
+                } else if (max === g) {
+                    h = (b - r) / diff + 2;
+                } else {
+                    h = (r - g) / diff + 4;
+                }
+            }
+            h = Math.round(h * 60);
+            if (h < 0) h += 360;
+
+            const s = max === 0 ? 0 : diff / max;
+            const v = max;
+
+            return { h, s, v };
+        }
+
+        // Check if pixel matches target color (chroma key detection)
+        function matchesTargetColor(r, g, b, threshold) {
+            if (!targetColor) {
+                // Fallback to green detection if no color selected
+                return isGreenPixel(r, g, b, threshold, settings.saturation);
+            }
+
+            // Calculate color distance in RGB space
+            const dr = r - targetColor.r;
+            const dg = g - targetColor.g;
+            const db = b - targetColor.b;
+            const distance = Math.sqrt(dr * dr + dg * dg + db * db);
+            
+            // Normalize distance (max possible distance is sqrt(3 * 255^2))
+            const maxDistance = Math.sqrt(3 * 255 * 255);
+            const normalizedDistance = distance / maxDistance;
+            
+            // Check if distance is within threshold
+            return normalizedDistance <= threshold;
+        }
+
+        // Check if pixel is green (fallback for when no color is selected)
+        function isGreenPixel(r, g, b, threshold, saturation) {
+            const hsv = rgbToHsv(r, g, b);
+            
+            // Green is typically in the 60-180 degree range in HSV
+            const isGreenHue = (hsv.h >= 60 && hsv.h <= 180);
+            const isSaturated = hsv.s >= saturation;
+            
+            // Also check if green channel is dominant
+            const greenDominance = g > r && g > b;
+            
+            return isGreenHue && isSaturated && greenDominance;
+        }
+
+        // Apply chroma key effect
+        function applyChromaKey(imageData) {
+            const data = imageData.data;
+            const threshold = settings.threshold;
+            const smoothness = settings.smoothness;
+
+            for (let i = 0; i < data.length; i += 4) {
+                const r = data[i];
+                const g = data[i + 1];
+                const b = data[i + 2];
+                
+                if (matchesTargetColor(r, g, b, threshold)) {
+                    // Calculate distance from target color for smoothness
+                    let colorDist;
+                    if (targetColor) {
+                        const dr = r - targetColor.r;
+                        const dg = g - targetColor.g;
+                        const db = b - targetColor.b;
+                        colorDist = Math.sqrt(dr * dr + dg * dg + db * db);
+                    } else {
+                        // Fallback to green distance
+                        colorDist = Math.sqrt(
+                            Math.pow(r - 0, 2) + 
+                            Math.pow(g - 255, 2) + 
+                            Math.pow(b - 0, 2)
+                        );
+                    }
+                    
+                    const maxDist = Math.sqrt(3 * 255 * 255);
+                    const normalizedDist = colorDist / maxDist;
+                    
+                    // Apply smoothness for edge blending
+                    const alpha = Math.min(1, normalizedDist / smoothness);
+                    data[i + 3] = alpha * 255; // Set alpha channel
+                }
+            }
+
+            return imageData;
+        }
+
+        // Redraw current frame with chroma key (works when paused)
+        function redrawFrame() {
+            if (video.readyState >= 2) {
+                // Set canvas size to match video
+                videoCanvas.width = video.videoWidth;
+                videoCanvas.height = video.videoHeight;
+
+                // Draw current video frame
+                ctx.drawImage(video, 0, 0);
+
+                // Get image data
+                const imageData = ctx.getImageData(0, 0, videoCanvas.width, videoCanvas.height);
+                
+                // Apply chroma key
+                const processedData = applyChromaKey(imageData);
+                
+                // Put processed data back
+                ctx.putImageData(processedData, 0, 0);
+            }
+        }
+
+        // Draw video frame with chroma key
+        function drawFrame() {
+            redrawFrame();
+
+            if (isPlaying && !video.paused && !video.ended) {
+                animationFrameId = requestAnimationFrame(drawFrame);
+            }
+        }
+
+        // Format time as MM:SS or HH:MM:SS
+        function formatTime(seconds) {
+            if (isNaN(seconds) || !isFinite(seconds)) return '0:00';
+            
+            const hours = Math.floor(seconds / 3600);
+            const minutes = Math.floor((seconds % 3600) / 60);
+            const secs = Math.floor(seconds % 60);
+            
+            if (hours > 0) {
+                return `${hours}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+            }
+            return `${minutes}:${secs.toString().padStart(2, '0')}`;
+        }
+
+        // Update seek bar and time display
+        function updateSeekBar() {
+            if (!isSeeking && video.duration) {
+                const progress = (video.currentTime / video.duration) * 100;
+                seekBar.value = progress;
+                currentTimeDisplay.textContent = formatTime(video.currentTime);
+            }
+        }
+
+        // Video event handlers
+        video.addEventListener('loadedmetadata', () => {
+            const videoWidth = video.videoWidth;
+            const videoHeight = video.videoHeight;
+            
+            // Set canvas dimensions to match video
+            videoCanvas.width = videoWidth;
+            videoCanvas.height = videoHeight;
+            
+            // Set container dimensions to match video exactly
+            const videoContainer = document.querySelector('.video-container');
+            const videoSection = document.querySelector('.video-section');
+            const mainContent = document.querySelector('.main-content');
+            const container = document.querySelector('.container');
+            
+            // Calculate available space in the main content area
+            const containerPadding = 60; // 30px on each side
+            const gap = 20; // Gap between video and controls
+            const mainContentMaxWidth = container.clientWidth - containerPadding;
+            const controlsSection = document.querySelector('.controls-section');
+            const controlsWidth = controlsSection ? controlsSection.getBoundingClientRect().width : mainContentMaxWidth * 0.3;
+            const maxWidth = mainContentMaxWidth - controlsWidth - gap;
+            const maxHeight = mainContent.clientHeight - 100; // Account for seek bar and controls
+            
+            let displayWidth = videoWidth;
+            let displayHeight = videoHeight;
+            
+            // Calculate scale factors for both dimensions
+            const widthScale = maxWidth / videoWidth;
+            const heightScale = maxHeight / videoHeight;
+            
+            // Use the smaller scale to ensure video fits in both dimensions
+            const scale = Math.min(widthScale, heightScale, 1); // Don't scale up
+            
+            if (scale < 1) {
+                displayWidth = videoWidth * scale;
+                displayHeight = videoHeight * scale;
+            }
+            
+            // Set video container dimensions
+            videoContainer.style.width = displayWidth + 'px';
+            videoContainer.style.height = displayHeight + 'px';
+            
+            // Set video-section width to match the display width
+            videoSection.style.width = displayWidth + 'px';
+            
+            durationDisplay.textContent = formatTime(video.duration);
+            
+            // Auto-play when video is loaded
+            if (video.readyState >= 2) {
+                video.play().catch(err => {
+                    console.log('Auto-play prevented:', err);
+                });
+            }
+        });
+
+        video.addEventListener('loadeddata', () => {
+            // Try auto-play when data is loaded
+            if (video.readyState >= 2) {
+                video.play().catch(err => {
+                    console.log('Auto-play prevented:', err);
+                });
+            }
+        });
+
+        video.addEventListener('timeupdate', () => {
+            updateSeekBar();
+        });
+
+        video.addEventListener('play', () => {
+            isPlaying = true;
+            playPauseBtn.textContent = '⏸️ Pause';
+            drawFrame();
+        });
+
+        video.addEventListener('pause', () => {
+            isPlaying = false;
+            playPauseBtn.textContent = '▶️ Play';
+            if (animationFrameId) {
+                cancelAnimationFrame(animationFrameId);
+            }
+        });
+
+        video.addEventListener('ended', () => {
+            if (isRepeating) {
+                video.currentTime = 0;
+                video.play();
+            } else {
+                isPlaying = false;
+                if (animationFrameId) {
+                    cancelAnimationFrame(animationFrameId);
+                }
+            }
+        });
+
+        // Play/Pause toggle button
+        playPauseBtn.addEventListener('click', () => {
+            if (video.paused || video.ended) {
+                if (video.src) {
+                    video.play();
+                }
+            } else {
+                video.pause();
+            }
+        });
+
+        // Repeat button
+        repeatBtn.addEventListener('click', () => {
+            isRepeating = !isRepeating;
+            video.loop = isRepeating;
+            if (isRepeating) {
+                repeatBtn.classList.add('repeat-active');
+                repeatBtn.textContent = '🔁 Repeat On';
+            } else {
+                repeatBtn.classList.remove('repeat-active');
+                repeatBtn.textContent = '🔁 Repeat';
+            }
+        });
+
+        // Seek bar functionality
+        seekBar.addEventListener('input', (e) => {
+            isSeeking = true;
+            if (video.duration && video.duration > 0) {
+                const seekTime = (parseFloat(e.target.value) / 100) * video.duration;
+                video.currentTime = seekTime;
+                currentTimeDisplay.textContent = formatTime(seekTime);
+            }
+        });
+
+        seekBar.addEventListener('change', () => {
+            isSeeking = false;
+        });
+
+        seekBar.addEventListener('mousedown', () => {
+            isSeeking = true;
+        });
+
+        seekBar.addEventListener('mouseup', () => {
+            isSeeking = false;
+        });
+
+        // Color picker functionality
+        colorPickerBtn.addEventListener('click', () => {
+            isPickerMode = !isPickerMode;
+            
+            if (isPickerMode) {
+                colorPickerBtn.classList.add('active');
+                colorPickerBtn.textContent = '✓ Click on Video';
+                videoCanvas.classList.add('picker-mode');
+            } else {
+                colorPickerBtn.classList.remove('active');
+                colorPickerBtn.textContent = '🎨 Pick Color';
+                videoCanvas.classList.remove('picker-mode');
+            }
+        });
+
+        // Handle canvas click for color picking
+        videoCanvas.addEventListener('click', (e) => {
+            if (!isPickerMode) return;
+
+            const rect = videoCanvas.getBoundingClientRect();
+            const scaleX = videoCanvas.width / rect.width;
+            const scaleY = videoCanvas.height / rect.height;
+            
+            const x = Math.floor((e.clientX - rect.left) * scaleX);
+            const y = Math.floor((e.clientY - rect.top) * scaleY);
+
+            // Get pixel color at clicked position
+            // We need to draw the current frame first if not already drawn
+            if (video.readyState >= 2) {
+                ctx.drawImage(video, 0, 0);
+                const imageData = ctx.getImageData(x, y, 1, 1);
+                const r = imageData.data[0];
+                const g = imageData.data[1];
+                const b = imageData.data[2];
+
+                // Store target color
+                targetColor = { r, g, b };
+
+                // Update UI
+                const colorHex = '#' + [r, g, b].map(x => {
+                    const hex = x.toString(16);
+                    return hex.length === 1 ? '0' + hex : hex;
+                }).join('');
+                
+                colorPreview.style.backgroundColor = colorHex;
+                colorInfo.textContent = `RGB(${r}, ${g}, ${b}) - ${colorHex}`;
+                selectedColorDisplay.style.display = 'flex';
+
+                // Exit picker mode
+                isPickerMode = false;
+                colorPickerBtn.classList.remove('active');
+                colorPickerBtn.textContent = '🎨 Pick Color';
+                videoCanvas.classList.remove('picker-mode');
+
+                // Redraw frame with new color
+                if (isPlaying || video.readyState >= 2) {
+                    drawFrame();
+                }
+            }
+        });
+
+        // File input handler
+        videoInput.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (file) {
+                const url = URL.createObjectURL(file);
+                video.src = url;
+                video.load();
+                // Auto-play after loading
+                video.addEventListener('loadeddata', () => {
+                    video.play().catch(err => {
+                        console.log('Auto-play prevented:', err);
+                    });
+                }, { once: true });
+            }
+        });
+
+        // Try to load input.mov by default
+        video.addEventListener('error', (e) => {
+            console.log('Could not load default video file. Please select a video file.');
+        });
+
+        // Auto-play when video can play
+        video.addEventListener('canplay', () => {
+            video.play().catch(err => {
+                console.log('Auto-play prevented:', err);
+            });
+        }, { once: true });
+
+        // Try loading input.mov if it exists
+        video.src = 'input.mov';
+        video.load();
+    </script>
+</body>
+</html>
