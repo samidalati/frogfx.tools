@@ -422,6 +422,15 @@
         button.repeat-active:hover {
             background: #ee5a5a;
         }
+
+        .reset-btn {
+            background: #6c757d;
+            width: 100%;
+        }
+
+        .reset-btn:hover {
+            background: #5a6268;
+        }
     </style>
 </head>
 <body>
@@ -471,14 +480,14 @@
                             <button id="colorPickerBtn" style="width: 100%; margin-bottom: 0;">🎨 Pick Color</button>
                         </div>
                         <div class="setting-group">
-                            <label>Color Threshold: <span class="value" id="thresholdValue">0.3</span></label>
-                            <input type="range" id="threshold" min="0" max="1" step="0.01" value="0.3">
-                            <small>How similar a pixel must be to the selected color (lower = more strict)</small>
+                            <label>Color Tolerance: <span class="value" id="thresholdValue">0.5</span></label>
+                            <input type="range" id="threshold" min="0.1" max="2" step="0.1" value="0.5">
+                            <small>Range of colors to remove (higher = removes more similar colors)</small>
                         </div>
                         <div class="setting-group">
-                            <label>Smoothness: <span class="value" id="smoothnessValue">0.2</span></label>
-                            <input type="range" id="smoothness" min="0" max="5" step="0.1" value="0.2">
-                            <small>Edge smoothing for better blending (higher = more aggressive filtering)</small>
+                            <label>Edge Softness: <span class="value" id="smoothnessValue">1.5</span></label>
+                            <input type="range" id="smoothness" min="0.1" max="5" step="0.1" value="1.5">
+                            <small>Softness of edges (lower = sharper/more aggressive, higher = softer)</small>
                         </div>
                     </div>
 
@@ -500,6 +509,10 @@
                             <input type="range" id="smoothnessDefault" min="0" max="5" step="0.1" value="0.2">
                             <small>Edge smoothing for better blending (higher = more aggressive filtering)</small>
                         </div>
+                    </div>
+
+                    <div class="setting-group" style="margin-top: 20px;">
+                        <button id="resetFilterBtn" class="reset-btn">🔄 Reset Filter</button>
                     </div>
 
                 <div id="selectedColorDisplay" class="selected-color-display" style="display: none;">
@@ -542,6 +555,7 @@
         const colorPickerSettings = document.getElementById('colorPickerSettings');
         const defaultSettings = document.getElementById('defaultSettings');
         const approachSelect = document.getElementById('approachSelect');
+        const resetFilterBtn = document.getElementById('resetFilterBtn');
         
         let currentApproach = 'default'; // 'default' or 'custom'
 
@@ -553,7 +567,7 @@
         let isRepeating = false;
         let isSeeking = false;
 
-        // Settings
+        // Settings (initial values for default green screen mode)
         let settings = {
             threshold: 0.3,
             saturation: 0.4,
@@ -579,100 +593,76 @@
 
         // Function to reset filter to default values
         function resetFilter() {
-            // Reset settings to defaults
-            settings.threshold = 0.3;
-            settings.saturation = 0.4;
-            settings.smoothness = 0.2;
+            // Reset sliders to their default values
+            // Custom color mode defaults
+            thresholdSlider.value = 0.5;
+            smoothnessSlider.value = 1.5;
+            thresholdValue.textContent = '0.50';
+            smoothnessValue.textContent = '1.50';
             
-            // Reset all sliders to default values
-            thresholdSlider.value = 0.3;
+            // Default green screen mode defaults
             thresholdSliderDefault.value = 0.3;
             saturationSlider.value = 0.4;
-            smoothnessSlider.value = 0.2;
             smoothnessSliderDefault.value = 0.2;
-            
-            // Update display values
-            thresholdValue.textContent = '0.30';
             thresholdValueDefault.textContent = '0.30';
             saturationValue.textContent = '0.40';
-            smoothnessValue.textContent = '0.20';
             smoothnessValueDefault.textContent = '0.20';
+            
+            // Reset settings based on current approach
+            if (currentApproach === 'custom') {
+                settings.threshold = 0.5;
+                settings.smoothness = 1.5;
+            } else {
+                settings.threshold = 0.3;
+                settings.saturation = 0.4;
+                settings.smoothness = 0.2;
+            }
             
             // Clear selected color
             targetColor = null;
+            targetHSV = null;
             selectedColorDisplay.style.display = 'none';
         }
 
         // Handle approach dropdown change
         approachSelect.addEventListener('change', (e) => {
-            // Reset filter when switching approaches
-            resetFilter();
-            
+            // Update approach first, then reset filter
             currentApproach = e.target.value;
+            resetFilter();
             updateSettingsVisibility();
             redrawFrame(); // Apply the selected approach immediately
         });
 
-        // Sync slider values between the two scenarios
-        function syncSliderValues() {
-            if (thresholdSlider && thresholdSliderDefault) {
-                thresholdSliderDefault.value = thresholdSlider.value;
-            }
-            if (smoothnessSlider && smoothnessSliderDefault) {
-                smoothnessSliderDefault.value = smoothnessSlider.value;
-            }
-        }
-
-        // Update display values - Color Picker Settings
+        // Update display values - Color Picker Settings (Custom mode)
         thresholdSlider.addEventListener('input', (e) => {
             settings.threshold = parseFloat(e.target.value);
             thresholdValue.textContent = settings.threshold.toFixed(2);
-            // Sync with default slider
-            if (thresholdSliderDefault) {
-                thresholdSliderDefault.value = e.target.value;
-                thresholdValueDefault.textContent = settings.threshold.toFixed(2);
-            }
-            redrawFrame(); // Apply changes immediately
+            redrawFrame();
         });
 
         smoothnessSlider.addEventListener('input', (e) => {
             settings.smoothness = parseFloat(e.target.value);
             smoothnessValue.textContent = settings.smoothness.toFixed(2);
-            // Sync with default slider
-            if (smoothnessSliderDefault) {
-                smoothnessSliderDefault.value = e.target.value;
-                smoothnessValueDefault.textContent = settings.smoothness.toFixed(2);
-            }
-            redrawFrame(); // Apply changes immediately
+            redrawFrame();
         });
 
-        // Update display values - Default Settings
+        // Update display values - Default Settings (Green screen mode)
         thresholdSliderDefault.addEventListener('input', (e) => {
             settings.threshold = parseFloat(e.target.value);
             thresholdValueDefault.textContent = settings.threshold.toFixed(2);
-            // Sync with color picker slider
-            if (thresholdSlider) {
-                thresholdSlider.value = e.target.value;
-                thresholdValue.textContent = settings.threshold.toFixed(2);
-            }
-            redrawFrame(); // Apply changes immediately
+            redrawFrame();
         });
 
         saturationSlider.addEventListener('input', (e) => {
             settings.saturation = parseFloat(e.target.value);
             saturationValue.textContent = settings.saturation.toFixed(2);
-            redrawFrame(); // Apply changes immediately
+            redrawFrame();
         });
 
         smoothnessSliderDefault.addEventListener('input', (e) => {
             settings.smoothness = parseFloat(e.target.value);
             smoothnessValueDefault.textContent = settings.smoothness.toFixed(2);
-            // Sync with color picker slider
-            if (smoothnessSlider) {
-                smoothnessSlider.value = e.target.value;
-                smoothnessValue.textContent = settings.smoothness.toFixed(2);
-            }
-            redrawFrame(); // Apply changes immediately
+            redrawFrame();
         });
 
         // Convert RGB to HSV
@@ -704,37 +694,37 @@
             return { h, s, v };
         }
 
-        // Check if pixel matches target color (chroma key detection)
-        function matchesTargetColor(r, g, b, threshold) {
-            // Use default green detection if approach is 'default' or no color selected
-            if (currentApproach === 'default' || !targetColor) {
-                return isGreenPixel(r, g, b, threshold, settings.saturation);
-            }
+        // Store target color in HSV for better matching
+        let targetHSV = null;
 
-            // Use custom color detection when approach is 'custom' and color is selected
-            // Calculate color distance in RGB space
-            const dr = r - targetColor.r;
-            const dg = g - targetColor.g;
-            const db = b - targetColor.b;
-            const distance = Math.sqrt(dr * dr + dg * dg + db * db);
+        // Calculate color similarity using HSV color space
+        // Returns a value from 0 (identical) to 1 (completely different)
+        function getColorSimilarity(r, g, b) {
+            if (!targetColor || !targetHSV) return 1;
             
-            // Normalize distance (max possible distance is sqrt(3 * 255^2))
-            const maxDistance = Math.sqrt(3 * 255 * 255);
-            const normalizedDistance = distance / maxDistance;
+            const pixelHSV = rgbToHsv(r, g, b);
             
-            // Check if distance is within threshold
-            return normalizedDistance <= threshold;
+            // Hue difference (circular, 0-360 degrees)
+            let hueDiff = Math.abs(pixelHSV.h - targetHSV.h);
+            if (hueDiff > 180) hueDiff = 360 - hueDiff;
+            const hueDistance = hueDiff / 180; // Normalize to 0-1
+            
+            // Saturation and value differences
+            const satDistance = Math.abs(pixelHSV.s - targetHSV.s);
+            const valDistance = Math.abs(pixelHSV.v - targetHSV.v);
+            
+            // Weighted combination - hue is most important for chroma keying
+            // For green screens, hue matching is critical
+            return hueDistance * 0.55 + satDistance * 0.30 + valDistance * 0.15;
         }
 
-        // Check if pixel is green (fallback for when no color is selected)
+        // Check if pixel is green (for default green screen mode)
         function isGreenPixel(r, g, b, threshold, saturation) {
             const hsv = rgbToHsv(r, g, b);
             
-            // Green is typically in the 60-180 degree range in HSV
+            // Green hue range in HSV (roughly 60-180 degrees)
             const isGreenHue = (hsv.h >= 60 && hsv.h <= 180);
             const isSaturated = hsv.s >= saturation;
-            
-            // Also check if green channel is dominant
             const greenDominance = g > r && g > b;
             
             return isGreenHue && isSaturated && greenDominance;
@@ -746,39 +736,93 @@
             const threshold = settings.threshold;
             const smoothness = settings.smoothness;
 
+            // Use default green screen detection
+            if (currentApproach === 'default') {
+                for (let i = 0; i < data.length; i += 4) {
+                    const r = data[i];
+                    const g = data[i + 1];
+                    const b = data[i + 2];
+                    
+                    if (isGreenPixel(r, g, b, threshold, settings.saturation)) {
+                        // Calculate how "green" this pixel is
+                        const greenness = (g - Math.max(r, b)) / 255;
+                        const hsv = rgbToHsv(r, g, b);
+                        
+                        // More saturated green = more transparent
+                        const transparency = greenness * hsv.s;
+                        const alpha = 1 - Math.min(1, transparency * smoothness * 5);
+                        
+                        data[i + 3] = Math.round(alpha * 255);
+                        
+                        // Spill suppression on edge pixels
+                        if (alpha > 0.05 && alpha < 0.95) {
+                            const avgRB = (r + b) / 2;
+                            const spillAmount = Math.max(0, g - avgRB) * (1 - alpha);
+                            data[i + 1] = Math.max(0, Math.round(g - spillAmount));
+                        }
+                    }
+                }
+                return imageData;
+            }
+
+            // Custom color picker mode - use HSV-based matching
+            // If no color selected yet, don't apply any filter
+            if (!targetColor || !targetHSV) {
+                return imageData;
+            }
+
             for (let i = 0; i < data.length; i += 4) {
                 const r = data[i];
                 const g = data[i + 1];
                 const b = data[i + 2];
                 
-                if (matchesTargetColor(r, g, b, threshold)) {
-                    // Calculate distance from target color for smoothness
-                    let colorDist;
-                    if (currentApproach === 'custom' && targetColor) {
-                        // Use custom color distance
-                        const dr = r - targetColor.r;
-                        const dg = g - targetColor.g;
-                        const db = b - targetColor.b;
-                        colorDist = Math.sqrt(dr * dr + dg * dg + db * db);
-                    } else {
-                        // Use green distance for default approach
-                        colorDist = Math.sqrt(
-                            Math.pow(r - 0, 2) + 
-                            Math.pow(g - 255, 2) + 
-                            Math.pow(b - 0, 2)
-                        );
+                // Get color similarity (0 = identical to target, 1 = completely different)
+                const similarity = getColorSimilarity(r, g, b);
+                
+                // Threshold controls which colors are considered for removal
+                // Higher threshold = more colors are considered similar (more aggressive)
+                const effectiveThreshold = threshold * 0.5; // Scale threshold to useful range
+                
+                if (similarity <= effectiveThreshold) {
+                    // Calculate alpha based on how similar the color is to the target
+                    // Closer to target = more transparent
+                    // Edge pixels (similarity near threshold) = partial transparency
+                    
+                    const distanceFromTarget = similarity / effectiveThreshold; // 0 = exact match, 1 = at threshold edge
+                    
+                    // Apply smoothness to control edge softness
+                    // Higher smoothness = softer edges (more gradual transition)
+                    const effectiveSmoothness = Math.max(0.1, smoothness);
+                    
+                    // Use power curve for smooth edge falloff
+                    // distanceFromTarget^(1/smoothness) creates softer edges as smoothness increases
+                    const alpha = Math.pow(distanceFromTarget, 1 / effectiveSmoothness);
+                    
+                    data[i + 3] = Math.round(alpha * 255);
+                    
+                    // Spill suppression for edge pixels
+                    // Reduces color contamination on semi-transparent edges
+                    if (alpha > 0.05 && alpha < 0.95) {
+                        // Determine which channel is dominant in target color
+                        const maxTarget = Math.max(targetColor.r, targetColor.g, targetColor.b);
+                        
+                        if (targetColor.g === maxTarget && targetColor.g > targetColor.r && targetColor.g > targetColor.b) {
+                            // Green screen - suppress green spill
+                            const avgRB = (r + b) / 2;
+                            const spillAmount = Math.max(0, g - avgRB) * (1 - alpha) * 0.8;
+                            data[i + 1] = Math.max(0, Math.round(g - spillAmount));
+                        } else if (targetColor.b === maxTarget && targetColor.b > targetColor.r && targetColor.b > targetColor.g) {
+                            // Blue screen - suppress blue spill
+                            const avgRG = (r + g) / 2;
+                            const spillAmount = Math.max(0, b - avgRG) * (1 - alpha) * 0.8;
+                            data[i + 2] = Math.max(0, Math.round(b - spillAmount));
+                        } else if (targetColor.r === maxTarget && targetColor.r > targetColor.g && targetColor.r > targetColor.b) {
+                            // Red screen - suppress red spill
+                            const avgGB = (g + b) / 2;
+                            const spillAmount = Math.max(0, r - avgGB) * (1 - alpha) * 0.8;
+                            data[i] = Math.max(0, Math.round(r - spillAmount));
+                        }
                     }
-                    
-                    const maxDist = Math.sqrt(3 * 255 * 255);
-                    const normalizedDist = colorDist / maxDist;
-                    
-                    // Apply smoothness for edge blending
-                    // Higher smoothness values make filtering more aggressive
-                    // Formula: alpha = normalizedDist / (smoothness^2) for more aggressive filtering
-                    // This makes pixels close to green more transparent as smoothness increases
-                    const effectiveSmoothness = Math.max(0.1, smoothness); // Prevent division by zero
-                    const alpha = Math.min(1, normalizedDist / (effectiveSmoothness * effectiveSmoothness));
-                    data[i + 3] = alpha * 255; // Set alpha channel
                 }
             }
 
@@ -957,6 +1001,12 @@
             }
         });
 
+        // Reset filter button
+        resetFilterBtn.addEventListener('click', () => {
+            resetFilter();
+            redrawFrame();
+        });
+
         // Seek bar functionality
         seekBar.addEventListener('input', (e) => {
             isSeeking = true;
@@ -1014,8 +1064,9 @@
                 const g = imageData.data[1];
                 const b = imageData.data[2];
 
-                // Store target color
+                // Store target color and its HSV equivalent
                 targetColor = { r, g, b };
+                targetHSV = rgbToHsv(r, g, b);
 
                 // Update UI
                 const colorHex = '#' + [r, g, b].map(x => {
@@ -1077,13 +1128,8 @@
         video.src = 'input.mov';
         video.load();
 
-        // Initialize settings visibility and sync values
+        // Initialize settings visibility
         updateSettingsVisibility();
-        syncSliderValues();
-        
-        // Set initial display values
-        thresholdValueDefault.textContent = settings.threshold.toFixed(2);
-        smoothnessValueDefault.textContent = settings.smoothness.toFixed(2);
     </script>
 </body>
 </html>
