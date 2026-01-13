@@ -230,6 +230,28 @@
             color: #333;
         }
 
+        .settings-scenario {
+            margin-bottom: 20px;
+            padding: 15px;
+            background: #fff;
+            border-radius: 6px;
+            border: 2px solid #e0e0e0;
+        }
+
+        .settings-scenario h4 {
+            margin-bottom: 12px;
+            color: #667eea;
+            font-size: 16px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .settings-scenario.active {
+            border-color: #667eea;
+            background: #f8f9ff;
+        }
+
         .setting-group {
             margin-bottom: 15px;
         }
@@ -249,6 +271,41 @@
         .setting-group .value {
             color: #667eea;
             font-weight: 600;
+        }
+
+        .approach-selector {
+            margin-bottom: 20px;
+        }
+
+        .approach-selector label {
+            display: block;
+            margin-bottom: 8px;
+            color: #333;
+            font-weight: 600;
+            font-size: 14px;
+        }
+
+        .approach-selector select {
+            width: 100%;
+            padding: 10px 12px;
+            font-size: 15px;
+            border: 2px solid #e0e0e0;
+            border-radius: 6px;
+            background: white;
+            color: #333;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            font-family: inherit;
+        }
+
+        .approach-selector select:hover {
+            border-color: #667eea;
+        }
+
+        .approach-selector select:focus {
+            outline: none;
+            border-color: #667eea;
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
         }
 
         #videoInput {
@@ -396,30 +453,54 @@
             </div>
 
             <div class="controls-section">
-                <div class="controls">
-                    <button id="colorPickerBtn">🎨 Pick Color</button>
-                </div>
-
                 <div class="settings">
-            <h3>Chroma Key Settings</h3>
-            
-            <div class="setting-group">
-                <label>Color Threshold: <span class="value" id="thresholdValue">0.3</span></label>
-                <input type="range" id="threshold" min="0" max="1" step="0.01" value="0.3">
-                <small>Adjust how sensitive the color detection is (lower = more strict)</small>
-            </div>
+                    <h3>Chroma Key Settings</h3>
+                    
+                    <div class="approach-selector">
+                        <label for="approachSelect">Detection Approach:</label>
+                        <select id="approachSelect">
+                            <option value="default">🟢 Default Green Screen Detection</option>
+                            <option value="custom">🎨 Custom Color Selected</option>
+                        </select>
+                    </div>
+                    
+                    <!-- Settings when color picker is used -->
+                    <div id="colorPickerSettings" class="settings-scenario" style="display: none;">
+                        <h4>🎨 Custom Color Selected</h4>
+                        <div class="setting-group" style="margin-bottom: 20px;">
+                            <button id="colorPickerBtn" style="width: 100%; margin-bottom: 0;">🎨 Pick Color</button>
+                        </div>
+                        <div class="setting-group">
+                            <label>Color Threshold: <span class="value" id="thresholdValue">0.3</span></label>
+                            <input type="range" id="threshold" min="0" max="1" step="0.01" value="0.3">
+                            <small>How similar a pixel must be to the selected color (lower = more strict)</small>
+                        </div>
+                        <div class="setting-group">
+                            <label>Smoothness: <span class="value" id="smoothnessValue">0.2</span></label>
+                            <input type="range" id="smoothness" min="0" max="5" step="0.1" value="0.2">
+                            <small>Edge smoothing for better blending (higher = more aggressive filtering)</small>
+                        </div>
+                    </div>
 
-            <div class="setting-group">
-                <label>Saturation Threshold: <span class="value" id="saturationValue">0.4</span></label>
-                <input type="range" id="saturation" min="0" max="1" step="0.01" value="0.4">
-                <small>Minimum saturation for color detection (only used when no color is selected)</small>
-            </div>
-
-            <div class="setting-group">
-                <label>Smoothness: <span class="value" id="smoothnessValue">0.2</span></label>
-                <input type="range" id="smoothness" min="0" max="1" step="0.01" value="0.2">
-                <small>Edge smoothing for better blending</small>
-                </div>
+                    <!-- Settings when color picker is NOT used (default green detection) -->
+                    <div id="defaultSettings" class="settings-scenario">
+                        <h4>🟢 Default Green Screen Detection</h4>
+                        <div class="setting-group">
+                            <label>Color Threshold: <span class="value" id="thresholdValueDefault">0.3</span></label>
+                            <input type="range" id="thresholdDefault" min="0" max="1" step="0.01" value="0.3">
+                            <small>How sensitive the green detection is (lower = more strict)</small>
+                        </div>
+                        <div class="setting-group">
+                            <label>Saturation Threshold: <span class="value" id="saturationValue">0.4</span></label>
+                            <input type="range" id="saturation" min="0" max="1" step="0.01" value="0.4">
+                            <small>Minimum color intensity required (filters out gray/desaturated pixels)</small>
+                        </div>
+                        <div class="setting-group">
+                            <label>Smoothness: <span class="value" id="smoothnessValueDefault">0.2</span></label>
+                            <input type="range" id="smoothnessDefault" min="0" max="5" step="0.1" value="0.2">
+                            <small>Edge smoothing for better blending (higher = more aggressive filtering)</small>
+                        </div>
+                    </div>
 
                 <div id="selectedColorDisplay" class="selected-color-display" style="display: none;">
                     <div class="color-preview" id="colorPreview"></div>
@@ -447,11 +528,22 @@
         const durationDisplay = document.getElementById('duration');
         
         const thresholdSlider = document.getElementById('threshold');
+        const thresholdSliderDefault = document.getElementById('thresholdDefault');
         const saturationSlider = document.getElementById('saturation');
         const smoothnessSlider = document.getElementById('smoothness');
+        const smoothnessSliderDefault = document.getElementById('smoothnessDefault');
+        
         const thresholdValue = document.getElementById('thresholdValue');
+        const thresholdValueDefault = document.getElementById('thresholdValueDefault');
         const saturationValue = document.getElementById('saturationValue');
         const smoothnessValue = document.getElementById('smoothnessValue');
+        const smoothnessValueDefault = document.getElementById('smoothnessValueDefault');
+        
+        const colorPickerSettings = document.getElementById('colorPickerSettings');
+        const defaultSettings = document.getElementById('defaultSettings');
+        const approachSelect = document.getElementById('approachSelect');
+        
+        let currentApproach = 'default'; // 'default' or 'custom'
 
         let video = document.createElement('video');
         let animationFrameId = null;
@@ -468,10 +560,101 @@
             smoothness: 0.2
         };
 
-        // Update display values
+        // Function to update settings visibility based on selected approach
+        function updateSettingsVisibility() {
+            if (currentApproach === 'custom') {
+                // Custom color approach - show custom color settings
+                colorPickerSettings.style.display = 'block';
+                defaultSettings.style.display = 'none';
+                colorPickerSettings.classList.add('active');
+                defaultSettings.classList.remove('active');
+            } else {
+                // Default approach - show default green detection settings
+                colorPickerSettings.style.display = 'none';
+                defaultSettings.style.display = 'block';
+                colorPickerSettings.classList.remove('active');
+                defaultSettings.classList.add('active');
+            }
+        }
+
+        // Function to reset filter to default values
+        function resetFilter() {
+            // Reset settings to defaults
+            settings.threshold = 0.3;
+            settings.saturation = 0.4;
+            settings.smoothness = 0.2;
+            
+            // Reset all sliders to default values
+            thresholdSlider.value = 0.3;
+            thresholdSliderDefault.value = 0.3;
+            saturationSlider.value = 0.4;
+            smoothnessSlider.value = 0.2;
+            smoothnessSliderDefault.value = 0.2;
+            
+            // Update display values
+            thresholdValue.textContent = '0.30';
+            thresholdValueDefault.textContent = '0.30';
+            saturationValue.textContent = '0.40';
+            smoothnessValue.textContent = '0.20';
+            smoothnessValueDefault.textContent = '0.20';
+            
+            // Clear selected color
+            targetColor = null;
+            selectedColorDisplay.style.display = 'none';
+        }
+
+        // Handle approach dropdown change
+        approachSelect.addEventListener('change', (e) => {
+            // Reset filter when switching approaches
+            resetFilter();
+            
+            currentApproach = e.target.value;
+            updateSettingsVisibility();
+            redrawFrame(); // Apply the selected approach immediately
+        });
+
+        // Sync slider values between the two scenarios
+        function syncSliderValues() {
+            if (thresholdSlider && thresholdSliderDefault) {
+                thresholdSliderDefault.value = thresholdSlider.value;
+            }
+            if (smoothnessSlider && smoothnessSliderDefault) {
+                smoothnessSliderDefault.value = smoothnessSlider.value;
+            }
+        }
+
+        // Update display values - Color Picker Settings
         thresholdSlider.addEventListener('input', (e) => {
             settings.threshold = parseFloat(e.target.value);
             thresholdValue.textContent = settings.threshold.toFixed(2);
+            // Sync with default slider
+            if (thresholdSliderDefault) {
+                thresholdSliderDefault.value = e.target.value;
+                thresholdValueDefault.textContent = settings.threshold.toFixed(2);
+            }
+            redrawFrame(); // Apply changes immediately
+        });
+
+        smoothnessSlider.addEventListener('input', (e) => {
+            settings.smoothness = parseFloat(e.target.value);
+            smoothnessValue.textContent = settings.smoothness.toFixed(2);
+            // Sync with default slider
+            if (smoothnessSliderDefault) {
+                smoothnessSliderDefault.value = e.target.value;
+                smoothnessValueDefault.textContent = settings.smoothness.toFixed(2);
+            }
+            redrawFrame(); // Apply changes immediately
+        });
+
+        // Update display values - Default Settings
+        thresholdSliderDefault.addEventListener('input', (e) => {
+            settings.threshold = parseFloat(e.target.value);
+            thresholdValueDefault.textContent = settings.threshold.toFixed(2);
+            // Sync with color picker slider
+            if (thresholdSlider) {
+                thresholdSlider.value = e.target.value;
+                thresholdValue.textContent = settings.threshold.toFixed(2);
+            }
             redrawFrame(); // Apply changes immediately
         });
 
@@ -481,9 +664,14 @@
             redrawFrame(); // Apply changes immediately
         });
 
-        smoothnessSlider.addEventListener('input', (e) => {
+        smoothnessSliderDefault.addEventListener('input', (e) => {
             settings.smoothness = parseFloat(e.target.value);
-            smoothnessValue.textContent = settings.smoothness.toFixed(2);
+            smoothnessValueDefault.textContent = settings.smoothness.toFixed(2);
+            // Sync with color picker slider
+            if (smoothnessSlider) {
+                smoothnessSlider.value = e.target.value;
+                smoothnessValue.textContent = settings.smoothness.toFixed(2);
+            }
             redrawFrame(); // Apply changes immediately
         });
 
@@ -518,11 +706,12 @@
 
         // Check if pixel matches target color (chroma key detection)
         function matchesTargetColor(r, g, b, threshold) {
-            if (!targetColor) {
-                // Fallback to green detection if no color selected
+            // Use default green detection if approach is 'default' or no color selected
+            if (currentApproach === 'default' || !targetColor) {
                 return isGreenPixel(r, g, b, threshold, settings.saturation);
             }
 
+            // Use custom color detection when approach is 'custom' and color is selected
             // Calculate color distance in RGB space
             const dr = r - targetColor.r;
             const dg = g - targetColor.g;
@@ -565,13 +754,14 @@
                 if (matchesTargetColor(r, g, b, threshold)) {
                     // Calculate distance from target color for smoothness
                     let colorDist;
-                    if (targetColor) {
+                    if (currentApproach === 'custom' && targetColor) {
+                        // Use custom color distance
                         const dr = r - targetColor.r;
                         const dg = g - targetColor.g;
                         const db = b - targetColor.b;
                         colorDist = Math.sqrt(dr * dr + dg * dg + db * db);
                     } else {
-                        // Fallback to green distance
+                        // Use green distance for default approach
                         colorDist = Math.sqrt(
                             Math.pow(r - 0, 2) + 
                             Math.pow(g - 255, 2) + 
@@ -583,7 +773,11 @@
                     const normalizedDist = colorDist / maxDist;
                     
                     // Apply smoothness for edge blending
-                    const alpha = Math.min(1, normalizedDist / smoothness);
+                    // Higher smoothness values make filtering more aggressive
+                    // Formula: alpha = normalizedDist / (smoothness^2) for more aggressive filtering
+                    // This makes pixels close to green more transparent as smoothness increases
+                    const effectiveSmoothness = Math.max(0.1, smoothness); // Prevent division by zero
+                    const alpha = Math.min(1, normalizedDist / (effectiveSmoothness * effectiveSmoothness));
                     data[i + 3] = alpha * 255; // Set alpha channel
                 }
             }
@@ -833,6 +1027,11 @@
                 colorInfo.textContent = `RGB(${r}, ${g}, ${b}) - ${colorHex}`;
                 selectedColorDisplay.style.display = 'flex';
 
+                // Switch to custom approach and update settings visibility
+                currentApproach = 'custom';
+                approachSelect.value = 'custom';
+                updateSettingsVisibility();
+
                 // Exit picker mode
                 isPickerMode = false;
                 colorPickerBtn.classList.remove('active');
@@ -877,6 +1076,14 @@
         // Try loading input.mov if it exists
         video.src = 'input.mov';
         video.load();
+
+        // Initialize settings visibility and sync values
+        updateSettingsVisibility();
+        syncSliderValues();
+        
+        // Set initial display values
+        thresholdValueDefault.textContent = settings.threshold.toFixed(2);
+        smoothnessValueDefault.textContent = settings.smoothness.toFixed(2);
     </script>
 </body>
 </html>
