@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Transparency Demo</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        html, body {
+            height: 100%;
+            overflow: hidden;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background-color: #ff00ff;
+            height: 100vh;
+            max-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 15px;
+        }
+
+        h1 {
+            color: white;
+            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.3);
+            margin-bottom: 10px;
+            text-align: center;
+            font-size: clamp(16px, 2.5vw, 24px);
+            flex-shrink: 0;
+        }
+
+        .controls {
+            margin-bottom: 10px;
+            flex-shrink: 0;
+        }
+
+        .file-input-label {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 10px 20px;
+            background: white;
+            color: #333;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: 600;
+            font-size: 14px;
+            transition: all 0.2s ease;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+        }
+
+        .file-input-label:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 16px rgba(0, 0, 0, 0.3);
+        }
+
+        #fileInput {
+            display: none;
+        }
+
+        .media-container {
+            flex: 1;
+            min-height: 0;
+            width: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+        }
+
+        #mediaDisplay, #videoDisplay {
+            max-width: 100%;
+            max-height: 100%;
+            border-radius: 8px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+            object-fit: contain;
+        }
+
+        .bottom-section {
+            flex-shrink: 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 8px;
+            padding-top: 10px;
+        }
+
+        .info {
+            color: white;
+            text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.3);
+            text-align: center;
+            font-size: 12px;
+            line-height: 1.4;
+        }
+
+        .video-controls {
+            display: none;
+            gap: 8px;
+        }
+
+        .video-controls.visible {
+            display: flex;
+        }
+
+        .video-controls button {
+            padding: 8px 16px;
+            background: white;
+            color: #333;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-weight: 600;
+            font-size: 13px;
+            transition: all 0.2s ease;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+        }
+
+        .video-controls button:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+        }
+
+        /* Small screen optimizations */
+        @media (max-height: 700px) {
+            body {
+                padding: 10px;
+            }
+
+            h1 {
+                font-size: 14px;
+                margin-bottom: 8px;
+            }
+
+            .controls {
+                margin-bottom: 8px;
+            }
+
+            .file-input-label {
+                padding: 8px 16px;
+                font-size: 12px;
+            }
+
+            .bottom-section {
+                gap: 6px;
+                padding-top: 8px;
+            }
+
+            .info {
+                font-size: 11px;
+            }
+
+            .video-controls button {
+                padding: 6px 12px;
+                font-size: 12px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <h1>Transparency Demo</h1>
+    
+    <div class="controls">
+        <label for="fileInput" class="file-input-label">
+            <i class="fas fa-folder-open"></i> Load File (WebP / WebM)
+        </label>
+        <input type="file" id="fileInput" accept=".webp,.webm,image/webp,video/webm">
+    </div>
+
+    <div class="media-container">
+        <img id="mediaDisplay" style="display: none;" alt="Loaded media">
+        <video id="videoDisplay" style="display: none;" loop></video>
+    </div>
+
+    <div class="bottom-section">
+        <div class="video-controls" id="videoControls">
+            <button id="playPauseBtn"><i class="fas fa-play"></i> Play</button>
+            <button id="restartBtn"><i class="fas fa-redo"></i> Restart</button>
+        </div>
+        <p class="info">Load a WebP image or WebM video to test transparency.<br>The magenta background will show through transparent areas.</p>
+    </div>
+
+    <script>
+        const fileInput = document.getElementById('fileInput');
+        const mediaDisplay = document.getElementById('mediaDisplay');
+        const videoDisplay = document.getElementById('videoDisplay');
+        const videoControls = document.getElementById('videoControls');
+        const playPauseBtn = document.getElementById('playPauseBtn');
+        const restartBtn = document.getElementById('restartBtn');
+
+        fileInput.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            const url = URL.createObjectURL(file);
+            const isVideo = file.type === 'video/webm' || file.name.endsWith('.webm');
+
+            if (isVideo) {
+                // Show video
+                mediaDisplay.style.display = 'none';
+                videoDisplay.style.display = 'block';
+                videoDisplay.src = url;
+                videoControls.classList.add('visible');
+                videoDisplay.play();
+                updatePlayPauseBtn();
+            } else {
+                // Show image
+                videoDisplay.style.display = 'none';
+                videoDisplay.pause();
+                videoControls.classList.remove('visible');
+                mediaDisplay.style.display = 'block';
+                mediaDisplay.src = url;
+            }
+        });
+
+        function updatePlayPauseBtn() {
+            if (videoDisplay.paused) {
+                playPauseBtn.innerHTML = '<i class="fas fa-play"></i> Play';
+            } else {
+                playPauseBtn.innerHTML = '<i class="fas fa-pause"></i> Pause';
+            }
+        }
+
+        videoDisplay.addEventListener('play', updatePlayPauseBtn);
+        videoDisplay.addEventListener('pause', updatePlayPauseBtn);
+
+        playPauseBtn.addEventListener('click', () => {
+            if (videoDisplay.paused) {
+                videoDisplay.play();
+            } else {
+                videoDisplay.pause();
+            }
+        });
+
+        restartBtn.addEventListener('click', () => {
+            videoDisplay.currentTime = 0;
+            videoDisplay.play();
+        });
+
+        // Check for preview data from index.html export
+        const urlParams = new URLSearchParams(window.location.search);
+        if (urlParams.get('preview') === 'true') {
+            const exportData = localStorage.getItem('lastExportData');
+            const exportType = localStorage.getItem('lastExportType');
+            
+            if (exportData) {
+                const isVideo = exportType && exportType.includes('video');
+                
+                if (isVideo) {
+                    mediaDisplay.style.display = 'none';
+                    videoDisplay.style.display = 'block';
+                    videoDisplay.src = exportData;
+                    videoControls.classList.add('visible');
+                    videoDisplay.play();
+                } else {
+                    videoDisplay.style.display = 'none';
+                    videoDisplay.pause();
+                    videoControls.classList.remove('visible');
+                    mediaDisplay.style.display = 'block';
+                    mediaDisplay.src = exportData;
+                }
+            }
+        }
+    </script>
+</body>
+</html>

@@ -4,6 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Green Screen Video - Transparent Background</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
     <style>
         * {
             margin: 0;
@@ -25,18 +27,17 @@
             flex-direction: column;
             align-items: center;
             justify-content: center;
-            padding: 20px;
+            padding: 10px;
             box-sizing: border-box;
         }
 
         .container {
             background: white;
             border-radius: 12px;
-            padding: 30px;
+            padding: 15px;
             box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
-            max-width: 1400px;
             width: 100%;
-            max-height: calc(100vh - 40px);
+            height: calc(100vh - 20px);
             display: flex;
             flex-direction: column;
             overflow: hidden;
@@ -45,45 +46,34 @@
         h1 {
             text-align: center;
             color: #333;
-            margin-bottom: 20px;
+            margin-bottom: 10px;
             flex-shrink: 0;
+            font-size: clamp(16px, 2vw, 24px);
         }
 
         .main-content {
             display: flex;
-            gap: 20px;
-            align-items: flex-start;
+            gap: 15px;
             flex: 1;
             min-height: 0;
             overflow: hidden;
         }
 
         .video-section {
-            width: auto;
+            flex: 1;
             min-width: 0;
             display: flex;
             flex-direction: column;
             overflow: hidden;
-            flex-shrink: 0;
         }
 
-        .video-controls {
+        .video-wrapper {
+            flex: 1;
+            min-height: 0;
             display: flex;
-            gap: 10px;
-            margin-top: 15px;
             justify-content: center;
-            flex-wrap: wrap;
-            flex-shrink: 0;
-        }
-
-        .video-controls button {
-            width: auto;
-            min-width: 120px;
-        }
-
-        .video-controls .file-input-label {
-            width: auto;
-            min-width: 150px;
+            align-items: center;
+            position: relative;
         }
 
         .video-container {
@@ -91,6 +81,18 @@
             display: flex;
             justify-content: center;
             align-items: center;
+            border-radius: 8px;
+            overflow: hidden;
+            max-width: 100%;
+            max-height: 100%;
+        }
+
+        .checkerboard-bg {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
             background: 
                 linear-gradient(45deg, #ccc 25%, transparent 25%),
                 linear-gradient(-45deg, #ccc 25%, transparent 25%),
@@ -98,68 +100,196 @@
                 linear-gradient(-45deg, transparent 75%, #ccc 75%);
             background-size: 20px 20px;
             background-position: 0 0, 0 10px, 10px -10px, -10px 0px;
-            border-radius: 8px;
-            overflow: hidden;
+            pointer-events: none;
         }
 
         #videoCanvas {
             display: block;
-            width: 100%;
-            height: 100%;
+            max-width: 100%;
+            max-height: 100%;
+            position: relative;
+            z-index: 1;
+        }
+
+        .video-controls-wrapper {
+            flex-shrink: 0;
+            padding-top: 8px;
+        }
+
+        .seek-container {
+            margin-bottom: 8px;
+        }
+
+        .seek-bar-wrapper {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .time-display {
+            font-size: 11px;
+            color: #666;
+            font-weight: 500;
+            min-width: 40px;
+            text-align: center;
+        }
+
+        #seekBar {
+            flex: 1;
+            height: 6px;
+            border-radius: 3px;
+            background: #e0e0e0;
+            outline: none;
+            cursor: pointer;
+            -webkit-appearance: none;
+            appearance: none;
+        }
+
+        #seekBar::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 14px;
+            height: 14px;
+            border-radius: 50%;
+            background: #667eea;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        #seekBar::-webkit-slider-thumb:hover {
+            background: #5568d3;
+            transform: scale(1.2);
+        }
+
+        #seekBar::-moz-range-thumb {
+            width: 14px;
+            height: 14px;
+            border-radius: 50%;
+            background: #667eea;
+            cursor: pointer;
+            border: none;
+        }
+
+        .video-controls {
+            display: flex;
+            gap: 6px;
+            justify-content: center;
+            flex-wrap: nowrap;
+        }
+
+        .video-controls button,
+        .video-controls .file-input-label {
+            width: 36px;
+            height: 36px;
+            min-width: 36px;
+            padding: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 14px;
+            border-radius: 6px;
+            position: relative;
+        }
+
+        .video-controls button i,
+        .video-controls .file-input-label i {
+            font-size: 14px;
+        }
+
+        /* Tooltip styles */
+        .video-controls button::after,
+        .video-controls .file-input-label::after {
+            content: attr(data-tooltip);
+            position: absolute;
+            bottom: calc(100% + 8px);
+            left: 50%;
+            transform: translateX(-50%);
+            background: #333;
+            color: white;
+            padding: 6px 10px;
+            border-radius: 4px;
+            font-size: 11px;
+            font-weight: 500;
+            white-space: nowrap;
+            opacity: 0;
+            visibility: hidden;
+            transition: opacity 0.2s, visibility 0.2s;
+            pointer-events: none;
+            z-index: 100;
+        }
+
+        .video-controls button::before,
+        .video-controls .file-input-label::before {
+            content: '';
+            position: absolute;
+            bottom: calc(100% + 2px);
+            left: 50%;
+            transform: translateX(-50%);
+            border: 6px solid transparent;
+            border-top-color: #333;
+            opacity: 0;
+            visibility: hidden;
+            transition: opacity 0.2s, visibility 0.2s;
+            pointer-events: none;
+            z-index: 100;
+        }
+
+        .video-controls button:hover::after,
+        .video-controls button:hover::before,
+        .video-controls .file-input-label:hover::after,
+        .video-controls .file-input-label:hover::before {
+            opacity: 1;
+            visibility: visible;
         }
 
         .controls-section {
             width: 30%;
+            min-width: 280px;
+            max-width: 350px;
             flex-shrink: 0;
             display: flex;
             flex-direction: column;
-            gap: 20px;
+            gap: 10px;
             overflow-y: auto;
-            max-height: 100%;
-            padding-right: 10px;
+            overflow-x: hidden;
+            padding-right: 5px;
         }
 
         .controls-section::-webkit-scrollbar {
-            width: 8px;
+            width: 6px;
         }
 
         .controls-section::-webkit-scrollbar-track {
             background: #f1f1f1;
-            border-radius: 4px;
+            border-radius: 3px;
         }
 
         .controls-section::-webkit-scrollbar-thumb {
             background: #ccc;
-            border-radius: 4px;
+            border-radius: 3px;
         }
 
         .controls-section::-webkit-scrollbar-thumb:hover {
             background: #999;
         }
 
-        .controls {
-            display: flex;
-            flex-direction: column;
-            gap: 10px;
-        }
-
         button {
-            padding: 12px 24px;
-            font-size: 16px;
+            padding: 8px 16px;
+            font-size: 13px;
             border: none;
             border-radius: 6px;
             cursor: pointer;
             background: #667eea;
             color: white;
             font-weight: 600;
-            transition: all 0.3s ease;
+            transition: all 0.2s ease;
             width: 100%;
         }
 
         button:hover {
             background: #5568d3;
-            transform: translateY(-2px);
-            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+            transform: translateY(-1px);
+            box-shadow: 0 2px 8px rgba(102, 126, 234, 0.4);
         }
 
         button:active {
@@ -174,7 +304,7 @@
 
         button.active {
             background: #ff6b6b;
-            box-shadow: 0 0 0 3px rgba(255, 107, 107, 0.3);
+            box-shadow: 0 0 0 2px rgba(255, 107, 107, 0.3);
         }
 
         button.active:hover {
@@ -188,63 +318,67 @@
         .selected-color-display {
             display: flex;
             align-items: center;
-            gap: 10px;
-            margin-top: 0;
-            padding: 15px;
+            gap: 8px;
+            padding: 10px;
             background: #fff;
             border-radius: 6px;
             border: 2px solid #667eea;
         }
 
         .color-preview {
-            width: 50px;
-            height: 50px;
-            border-radius: 6px;
+            width: 36px;
+            height: 36px;
+            border-radius: 4px;
             border: 2px solid #ddd;
             background: #000;
+            flex-shrink: 0;
         }
 
         .color-info {
             flex: 1;
+            min-width: 0;
         }
 
         .color-info strong {
             display: block;
-            margin-bottom: 5px;
+            margin-bottom: 3px;
             color: #333;
+            font-size: 12px;
         }
 
         .color-info small {
             color: #666;
+            font-size: 11px;
+            word-break: break-all;
         }
 
         .settings {
             background: #f5f5f5;
             border-radius: 8px;
-            padding: 20px;
-            margin-top: 0;
+            padding: 12px;
         }
 
         .settings h3 {
-            margin-bottom: 15px;
+            margin-bottom: 10px;
             color: #333;
+            font-size: 14px;
         }
 
         .settings-scenario {
-            margin-bottom: 20px;
-            padding: 15px;
+            margin-bottom: 12px;
+            padding: 10px;
             background: #fff;
             border-radius: 6px;
             border: 2px solid #e0e0e0;
         }
 
         .settings-scenario h4 {
-            margin-bottom: 12px;
+            margin-bottom: 10px;
             color: #667eea;
-            font-size: 16px;
+            font-size: 13px;
             display: flex;
             align-items: center;
-            gap: 8px;
+            gap: 6px;
         }
 
         .settings-scenario.active {
@@ -253,19 +387,24 @@
         }
 
         .setting-group {
-            margin-bottom: 15px;
+            margin-bottom: 10px;
+        }
+
+        .setting-group:last-child {
+            margin-bottom: 0;
         }
 
         .setting-group label {
             display: block;
-            margin-bottom: 5px;
+            margin-bottom: 4px;
             color: #666;
             font-weight: 500;
+            font-size: 12px;
         }
 
         .setting-group input[type="range"] {
             width: 100%;
-            margin-bottom: 5px;
+            margin-bottom: 3px;
         }
 
         .setting-group .value {
@@ -273,28 +412,35 @@
             font-weight: 600;
         }
 
+        .setting-group small {
+            display: block;
+            color: #888;
+            font-size: 10px;
+            line-height: 1.3;
+        }
+
         .approach-selector {
-            margin-bottom: 20px;
+            margin-bottom: 12px;
         }
 
         .approach-selector label {
             display: block;
-            margin-bottom: 8px;
+            margin-bottom: 6px;
             color: #333;
             font-weight: 600;
-            font-size: 14px;
+            font-size: 12px;
         }
 
         .approach-selector select {
             width: 100%;
-            padding: 10px 12px;
-            font-size: 15px;
+            padding: 8px 10px;
+            font-size: 13px;
             border: 2px solid #e0e0e0;
             border-radius: 6px;
             background: white;
             color: #333;
             cursor: pointer;
-            transition: all 0.3s ease;
+            transition: all 0.2s ease;
             font-family: inherit;
         }
 
@@ -305,7 +451,7 @@
         .approach-selector select:focus {
             outline: none;
             border-color: #667eea;
-            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+            box-shadow: 0 0 0 2px rgba(102, 126, 234, 0.1);
         }
 
         #videoInput {
@@ -313,106 +459,46 @@
         }
 
         .file-input-label {
-            display: block;
-            padding: 12px 24px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
             background: #28a745;
             color: white;
             border-radius: 6px;
             cursor: pointer;
             font-weight: 600;
-            transition: all 0.3s ease;
+            transition: all 0.2s ease;
             text-align: center;
-            width: 100%;
         }
 
         .file-input-label:hover {
             background: #218838;
-            transform: translateY(-2px);
-            box-shadow: 0 4px 12px rgba(40, 167, 69, 0.4);
+            transform: translateY(-1px);
+            box-shadow: 0 2px 8px rgba(40, 167, 69, 0.4);
         }
 
-        @media (max-width: 1024px) {
-            .main-content {
-                flex-direction: column;
-            }
-
-            .video-section {
-                width: 100%;
-            }
-
-            .controls-section {
-                width: 100%;
-            }
-
-            .seek-bar-wrapper {
-                flex-direction: row;
-            }
+        .reset-btn {
+            background: #6c757d;
         }
 
-        .seek-container {
-            margin: 0;
-            padding: 0;
-            flex-shrink: 0;
+        .reset-btn:hover {
+            background: #5a6268;
         }
 
-        .seek-bar-wrapper {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            flex-direction: column;
+        .export-btn {
+            background: #17a2b8;
         }
 
-        .seek-bar-wrapper.horizontal {
-            flex-direction: row;
+        .export-btn:hover {
+            background: #138496;
         }
 
-        .time-display {
-            font-size: 14px;
-            color: #666;
-            font-weight: 500;
-            min-width: 60px;
-            text-align: center;
+        .preview-btn {
+            background: #6f42c1;
         }
 
-        #seekBar {
-            width: 100%;
-            height: 8px;
-            border-radius: 4px;
-            background: #e0e0e0;
-            outline: none;
-            cursor: pointer;
-            -webkit-appearance: none;
-        }
-
-        #seekBar::-webkit-slider-thumb {
-            -webkit-appearance: none;
-            appearance: none;
-            width: 18px;
-            height: 18px;
-            border-radius: 50%;
-            background: #667eea;
-            cursor: pointer;
-            transition: all 0.2s ease;
-        }
-
-        #seekBar::-webkit-slider-thumb:hover {
-            background: #5568d3;
-            transform: scale(1.2);
-        }
-
-        #seekBar::-moz-range-thumb {
-            width: 18px;
-            height: 18px;
-            border-radius: 50%;
-            background: #667eea;
-            cursor: pointer;
-            border: none;
-            transition: all 0.2s ease;
-        }
-
-        #seekBar::-moz-range-thumb:hover {
-            background: #5568d3;
-            transform: scale(1.2);
+        .preview-btn:hover:not(:disabled) {
+            background: #5a32a3;
         }
 
         button.repeat-active {
@@ -423,41 +509,224 @@
             background: #ee5a5a;
         }
 
-        .reset-btn {
-            background: #6c757d;
+        /* Modal styles */
+        .modal-overlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
             width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.6);
+            z-index: 1000;
+            justify-content: center;
+            align-items: center;
         }
 
-        .reset-btn:hover {
+        .modal-overlay.active {
+            display: flex;
+        }
+
+        .modal {
+            background: white;
+            border-radius: 12px;
+            padding: 20px;
+            max-width: 360px;
+            width: 90%;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+        }
+
+        .modal h3 {
+            margin-bottom: 15px;
+            color: #333;
+            text-align: center;
+            font-size: 16px;
+        }
+
+        .modal-group {
+            margin-bottom: 15px;
+        }
+
+        .modal-group label {
+            display: block;
+            margin-bottom: 6px;
+            color: #333;
+            font-weight: 600;
+            font-size: 13px;
+        }
+
+        .modal-group select,
+        .modal-group input {
+            width: 100%;
+            padding: 8px 10px;
+            font-size: 13px;
+            border: 2px solid #e0e0e0;
+            border-radius: 6px;
+            background: white;
+            color: #333;
+            font-family: inherit;
+        }
+
+        .modal-group select:focus,
+        .modal-group input:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        .modal-group small {
+            display: block;
+            margin-top: 4px;
+            color: #666;
+            font-size: 11px;
+        }
+
+        .modal-buttons {
+            display: flex;
+            gap: 10px;
+            margin-top: 20px;
+        }
+
+        .modal-buttons button {
+            flex: 1;
+            padding: 10px;
+        }
+
+        .modal-buttons .cancel-btn {
+            background: #6c757d;
+        }
+
+        .modal-buttons .cancel-btn:hover {
             background: #5a6268;
+        }
+
+        .modal-buttons .confirm-btn {
+            background: #17a2b8;
+        }
+
+        .modal-buttons .confirm-btn:hover {
+            background: #138496;
+        }
+
+        .export-progress {
+            margin-top: 15px;
+            display: none;
+        }
+
+        .export-progress.active {
+            display: block;
+        }
+
+        .progress-bar {
+            width: 100%;
+            height: 16px;
+            background: #e0e0e0;
+            border-radius: 8px;
+            overflow: hidden;
+        }
+
+        .progress-bar-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #667eea, #764ba2);
+            width: 0%;
+            transition: width 0.3s ease;
+        }
+
+        .progress-text {
+            text-align: center;
+            margin-top: 8px;
+            color: #666;
+            font-size: 12px;
+        }
+
+        /* Small screen optimizations */
+        @media (max-height: 700px) {
+            body {
+                padding: 5px;
+            }
+            
+            .container {
+                padding: 10px;
+                height: calc(100vh - 10px);
+            }
+            
+            h1 {
+                font-size: 14px;
+                margin-bottom: 8px;
+            }
+            
+            .main-content {
+                gap: 10px;
+            }
+            
+            .video-controls button,
+            .video-controls .file-input-label {
+                width: 32px;
+                height: 32px;
+                min-width: 32px;
+            }
+            
+            .video-controls button i,
+            .video-controls .file-input-label i {
+                font-size: 12px;
+            }
+            
+            .settings {
+                padding: 10px;
+            }
+            
+            .settings h3 {
+                font-size: 13px;
+                margin-bottom: 8px;
+            }
+            
+            .settings-scenario {
+                padding: 8px;
+                margin-bottom: 8px;
+            }
+            
+            .setting-group {
+                margin-bottom: 8px;
+            }
+            
+            .controls-section {
+                min-width: 240px;
+            }
         }
     </style>
 </head>
 <body>
     <div class="container">
-        <h1>🎬 Green Screen Video Player</h1>
+        <h1>Green Screen Video Player</h1>
         
         <div class="main-content">
             <div class="video-section">
-                <div class="video-container">
-                    <canvas id="videoCanvas"></canvas>
-                </div>
-                
-                <div class="seek-container">
-                    <div class="seek-bar-wrapper horizontal">
-                        <span class="time-display" id="currentTime">0:00</span>
-                        <input type="range" id="seekBar" min="0" max="100" value="0" step="0.1">
-                        <span class="time-display" id="duration">0:00</span>
+                <div class="video-wrapper">
+                    <div class="video-container" id="videoContainer">
+                        <div class="checkerboard-bg" id="checkerboardBg"></div>
+                        <canvas id="videoCanvas"></canvas>
                     </div>
                 </div>
+                
+                <div class="video-controls-wrapper">
+                    <div class="seek-container">
+                        <div class="seek-bar-wrapper">
+                            <span class="time-display" id="currentTime">0:00</span>
+                            <input type="range" id="seekBar" min="0" max="100" value="0" step="0.1">
+                            <span class="time-display" id="duration">0:00</span>
+                        </div>
+                    </div>
 
-                <div class="video-controls">
-                    <label for="videoInput" class="file-input-label">
-                        📁 Choose Video File
-                    </label>
-                    <input type="file" id="videoInput" accept="video/*">
-                    <button id="playPauseBtn">▶️ Play</button>
-                    <button id="repeatBtn">🔁 Repeat</button>
+                    <div class="video-controls">
+                        <label for="videoInput" class="file-input-label" data-tooltip="Open video file">
+                            <i class="fas fa-folder-open"></i>
+                        </label>
+                        <input type="file" id="videoInput" accept="video/*">
+                        <button id="playPauseBtn" data-tooltip="Play"><i class="fas fa-play"></i></button>
+                        <button id="muteBtn" data-tooltip="Unmute"><i class="fas fa-volume-mute"></i></button>
+                        <button id="repeatBtn" data-tooltip="Toggle repeat"><i class="fas fa-redo"></i></button>
+                        <button id="exportBtn" class="export-btn" data-tooltip="Export video"><i class="fas fa-download"></i></button>
+                        <button id="previewBtn" class="preview-btn" data-tooltip="Preview last export" disabled><i class="fas fa-eye"></i></button>
+                    </div>
                 </div>
             </div>
 
@@ -468,16 +737,16 @@
                     <div class="approach-selector">
                         <label for="approachSelect">Detection Approach:</label>
                         <select id="approachSelect">
-                            <option value="default">🟢 Default Green Screen Detection</option>
-                            <option value="custom">🎨 Custom Color Selected</option>
+                            <option value="default">Default Green Screen Detection</option>
+                            <option value="custom">Custom Color Selection</option>
                         </select>
                     </div>
                     
                     <!-- Settings when color picker is used -->
                     <div id="colorPickerSettings" class="settings-scenario" style="display: none;">
-                        <h4>🎨 Custom Color Selected</h4>
-                        <div class="setting-group" style="margin-bottom: 20px;">
-                            <button id="colorPickerBtn" style="width: 100%; margin-bottom: 0;">🎨 Pick Color</button>
+                        <h4><i class="fas fa-palette"></i> Custom Color Selected</h4>
+                        <div class="setting-group" style="margin-bottom: 12px;">
+                            <button id="colorPickerBtn" style="width: 100%; margin-bottom: 0;"><i class="fas fa-eyedropper"></i> Pick Color</button>
                         </div>
                         <div class="setting-group">
                             <label>Color Tolerance: <span class="value" id="thresholdValue">0.5</span></label>
@@ -493,7 +762,7 @@
 
                     <!-- Settings when color picker is NOT used (default green detection) -->
                     <div id="defaultSettings" class="settings-scenario">
-                        <h4>🟢 Default Green Screen Detection</h4>
+                        <h4><i class="fas fa-circle" style="color: #28a745;"></i> Default Green Screen Detection</h4>
                         <div class="setting-group">
                             <label>Color Threshold: <span class="value" id="thresholdValueDefault">0.3</span></label>
                             <input type="range" id="thresholdDefault" min="0" max="1" step="0.01" value="0.3">
@@ -511,17 +780,58 @@
                         </div>
                     </div>
 
-                    <div class="setting-group" style="margin-top: 20px;">
-                        <button id="resetFilterBtn" class="reset-btn">🔄 Reset Filter</button>
+                    <div class="setting-group" style="margin-top: 12px;">
+                        <button id="resetFilterBtn" class="reset-btn"><i class="fas fa-undo"></i> Reset Filter</button>
                     </div>
 
-                <div id="selectedColorDisplay" class="selected-color-display" style="display: none;">
-                    <div class="color-preview" id="colorPreview"></div>
-                    <div class="color-info">
-                        <strong>Selected Color to Remove:</strong>
-                        <small id="colorInfo">Click the color picker button, then click on the video to select a color.</small>
+                    <div id="selectedColorDisplay" class="selected-color-display" style="display: none;">
+                        <div class="color-preview" id="colorPreview"></div>
+                        <div class="color-info">
+                            <strong>Selected Color to Remove:</strong>
+                            <small id="colorInfo">Click the color picker button, then click on the video to select a color.</small>
+                        </div>
                     </div>
                 </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Export Modal -->
+    <div class="modal-overlay" id="exportModal">
+        <div class="modal">
+            <h3><i class="fas fa-download"></i> Export Video</h3>
+            
+            <div class="modal-group">
+                <label for="exportFps">Frames Per Second (FPS):</label>
+                <select id="exportFps">
+                    <option value="10">10 FPS</option>
+                    <option value="15">15 FPS</option>
+                    <option value="24">24 FPS</option>
+                    <option value="30" selected>30 FPS</option>
+                    <option value="60">60 FPS</option>
+                </select>
+                <small>Higher FPS = smoother but larger file size</small>
+            </div>
+
+            <div class="modal-group">
+                <label for="exportFormat">Export Format:</label>
+                <select id="exportFormat">
+                    <option value="frames">Frame by Frame (ZIP of WebP images)</option>
+                    <option value="webm">Animated Video (WebM with transparency)</option>
+                </select>
+                <small>Frame by frame exports a ZIP; WebM exports a video file</small>
+            </div>
+
+            <div class="export-progress" id="exportProgress">
+                <div class="progress-bar">
+                    <div class="progress-bar-fill" id="progressBarFill"></div>
+                </div>
+                <div class="progress-text" id="progressText">Exporting... 0%</div>
+            </div>
+
+            <div class="modal-buttons" id="modalButtons">
+                <button class="cancel-btn" id="cancelExportBtn"><i class="fas fa-times"></i> Cancel</button>
+                <button class="confirm-btn" id="confirmExportBtn"><i class="fas fa-check"></i> Export</button>
             </div>
         </div>
     </div>
@@ -532,6 +842,7 @@
         const ctx = videoCanvas.getContext('2d', { willReadFrequently: true });
         const playPauseBtn = document.getElementById('playPauseBtn');
         const repeatBtn = document.getElementById('repeatBtn');
+        const muteBtn = document.getElementById('muteBtn');
         const colorPickerBtn = document.getElementById('colorPickerBtn');
         const selectedColorDisplay = document.getElementById('selectedColorDisplay');
         const colorPreview = document.getElementById('colorPreview');
@@ -560,6 +871,7 @@
         let currentApproach = 'default'; // 'default' or 'custom'
 
         let video = document.createElement('video');
+        video.muted = true; // Default to muted
         let animationFrameId = null;
         let isPlaying = false;
         let isPickerMode = false;
@@ -882,8 +1194,10 @@
             }
         }
 
-        // Video event handlers
-        video.addEventListener('loadedmetadata', () => {
+        // Function to resize video to fit available space
+        function resizeVideoToFit() {
+            if (!video.videoWidth || !video.videoHeight) return;
+            
             const videoWidth = video.videoWidth;
             const videoHeight = video.videoHeight;
             
@@ -891,42 +1205,39 @@
             videoCanvas.width = videoWidth;
             videoCanvas.height = videoHeight;
             
-            // Set container dimensions to match video exactly
-            const videoContainer = document.querySelector('.video-container');
-            const videoSection = document.querySelector('.video-section');
-            const mainContent = document.querySelector('.main-content');
-            const container = document.querySelector('.container');
+            const videoWrapper = document.querySelector('.video-wrapper');
+            const videoContainer = document.getElementById('videoContainer');
+            const checkerboardBg = document.getElementById('checkerboardBg');
             
-            // Calculate available space in the main content area
-            const containerPadding = 60; // 30px on each side
-            const gap = 20; // Gap between video and controls
-            const mainContentMaxWidth = container.clientWidth - containerPadding;
-            const controlsSection = document.querySelector('.controls-section');
-            const controlsWidth = controlsSection ? controlsSection.getBoundingClientRect().width : mainContentMaxWidth * 0.3;
-            const maxWidth = mainContentMaxWidth - controlsWidth - gap;
-            const maxHeight = mainContent.clientHeight - 100; // Account for seek bar and controls
+            // Get available space
+            const wrapperRect = videoWrapper.getBoundingClientRect();
+            const maxWidth = wrapperRect.width;
+            const maxHeight = wrapperRect.height;
             
-            let displayWidth = videoWidth;
-            let displayHeight = videoHeight;
-            
-            // Calculate scale factors for both dimensions
+            // Calculate scale to fit
             const widthScale = maxWidth / videoWidth;
             const heightScale = maxHeight / videoHeight;
+            const scale = Math.min(widthScale, heightScale, 1); // Don't scale up beyond original
             
-            // Use the smaller scale to ensure video fits in both dimensions
-            const scale = Math.min(widthScale, heightScale, 1); // Don't scale up
+            const displayWidth = Math.floor(videoWidth * scale);
+            const displayHeight = Math.floor(videoHeight * scale);
             
-            if (scale < 1) {
-                displayWidth = videoWidth * scale;
-                displayHeight = videoHeight * scale;
-            }
+            // Set canvas display size
+            videoCanvas.style.width = displayWidth + 'px';
+            videoCanvas.style.height = displayHeight + 'px';
             
-            // Set video container dimensions
+            // Set container to match canvas size
             videoContainer.style.width = displayWidth + 'px';
             videoContainer.style.height = displayHeight + 'px';
             
-            // Set video-section width to match the display width
-            videoSection.style.width = displayWidth + 'px';
+            // Set checkerboard to exactly match the video display size
+            checkerboardBg.style.width = displayWidth + 'px';
+            checkerboardBg.style.height = displayHeight + 'px';
+        }
+
+        // Video event handlers
+        video.addEventListener('loadedmetadata', () => {
+            resizeVideoToFit();
             
             durationDisplay.textContent = formatTime(video.duration);
             
@@ -936,6 +1247,12 @@
                     console.log('Auto-play prevented:', err);
                 });
             }
+        });
+
+        // Handle window resize
+        window.addEventListener('resize', () => {
+            resizeVideoToFit();
+            redrawFrame();
         });
 
         video.addEventListener('loadeddata', () => {
@@ -953,13 +1270,15 @@
 
         video.addEventListener('play', () => {
             isPlaying = true;
-            playPauseBtn.textContent = '⏸️ Pause';
+            playPauseBtn.innerHTML = '<i class="fas fa-pause"></i>';
+            playPauseBtn.setAttribute('data-tooltip', 'Pause');
             drawFrame();
         });
 
         video.addEventListener('pause', () => {
             isPlaying = false;
-            playPauseBtn.textContent = '▶️ Play';
+            playPauseBtn.innerHTML = '<i class="fas fa-play"></i>';
+            playPauseBtn.setAttribute('data-tooltip', 'Play');
             if (animationFrameId) {
                 cancelAnimationFrame(animationFrameId);
             }
@@ -994,10 +1313,22 @@
             video.loop = isRepeating;
             if (isRepeating) {
                 repeatBtn.classList.add('repeat-active');
-                repeatBtn.textContent = '🔁 Repeat On';
+                repeatBtn.setAttribute('data-tooltip', 'Repeat: ON');
             } else {
                 repeatBtn.classList.remove('repeat-active');
-                repeatBtn.textContent = '🔁 Repeat';
+                repeatBtn.setAttribute('data-tooltip', 'Toggle repeat');
+            }
+        });
+
+        // Mute button
+        muteBtn.addEventListener('click', () => {
+            video.muted = !video.muted;
+            if (video.muted) {
+                muteBtn.innerHTML = '<i class="fas fa-volume-mute"></i>';
+                muteBtn.setAttribute('data-tooltip', 'Unmute');
+            } else {
+                muteBtn.innerHTML = '<i class="fas fa-volume-up"></i>';
+                muteBtn.setAttribute('data-tooltip', 'Mute');
             }
         });
 
@@ -1035,11 +1366,11 @@
             
             if (isPickerMode) {
                 colorPickerBtn.classList.add('active');
-                colorPickerBtn.textContent = '✓ Click on Video';
+                colorPickerBtn.innerHTML = '<i class="fas fa-crosshairs"></i> Click Video';
                 videoCanvas.classList.add('picker-mode');
             } else {
                 colorPickerBtn.classList.remove('active');
-                colorPickerBtn.textContent = '🎨 Pick Color';
+                colorPickerBtn.innerHTML = '<i class="fas fa-eyedropper"></i> Pick Color';
                 videoCanvas.classList.remove('picker-mode');
             }
         });
@@ -1086,7 +1417,7 @@
                 // Exit picker mode
                 isPickerMode = false;
                 colorPickerBtn.classList.remove('active');
-                colorPickerBtn.textContent = '🎨 Pick Color';
+                colorPickerBtn.innerHTML = '<i class="fas fa-eyedropper"></i> Pick Color';
                 videoCanvas.classList.remove('picker-mode');
 
                 // Redraw frame with new color
@@ -1130,6 +1461,357 @@
 
         // Initialize settings visibility
         updateSettingsVisibility();
+
+        // ==================== EXPORT FUNCTIONALITY ====================
+        const exportBtn = document.getElementById('exportBtn');
+        const previewBtn = document.getElementById('previewBtn');
+        const exportModal = document.getElementById('exportModal');
+        const exportFpsSelect = document.getElementById('exportFps');
+        const exportFormatSelect = document.getElementById('exportFormat');
+        const cancelExportBtn = document.getElementById('cancelExportBtn');
+        const confirmExportBtn = document.getElementById('confirmExportBtn');
+        const exportProgress = document.getElementById('exportProgress');
+        const progressBarFill = document.getElementById('progressBarFill');
+        const progressText = document.getElementById('progressText');
+        const modalButtons = document.getElementById('modalButtons');
+
+        let isExporting = false;
+
+        // Check if there's a previous export in localStorage
+        if (localStorage.getItem('lastExportData')) {
+            previewBtn.disabled = false;
+        }
+
+        // Preview button - open demo page with last export
+        previewBtn.addEventListener('click', () => {
+            if (localStorage.getItem('lastExportData')) {
+                window.open('preview.html?preview=true', '_blank');
+            }
+        });
+
+        // Generate timestamp string for filenames
+        function getTimestamp() {
+            const now = new Date();
+            const year = now.getFullYear();
+            const month = String(now.getMonth() + 1).padStart(2, '0');
+            const day = String(now.getDate()).padStart(2, '0');
+            const hours = String(now.getHours()).padStart(2, '0');
+            const minutes = String(now.getMinutes()).padStart(2, '0');
+            const seconds = String(now.getSeconds()).padStart(2, '0');
+            return `${year}${month}${day}_${hours}${minutes}${seconds}`;
+        }
+
+        // Open export modal
+        exportBtn.addEventListener('click', () => {
+            if (!video.src || video.readyState < 2) {
+                alert('Please load a video first.');
+                return;
+            }
+            exportModal.classList.add('active');
+        });
+
+        // Close export modal
+        cancelExportBtn.addEventListener('click', () => {
+            if (!isExporting) {
+                exportModal.classList.remove('active');
+            }
+        });
+
+        // Close modal when clicking overlay
+        exportModal.addEventListener('click', (e) => {
+            if (e.target === exportModal && !isExporting) {
+                exportModal.classList.remove('active');
+            }
+        });
+
+        // Export function
+        confirmExportBtn.addEventListener('click', async () => {
+            const fps = parseInt(exportFpsSelect.value);
+            const format = exportFormatSelect.value;
+            
+            isExporting = true;
+            exportProgress.classList.add('active');
+            modalButtons.style.display = 'none';
+            
+            try {
+                if (format === 'frames') {
+                    await exportFrames(fps);
+                } else {
+                    await exportWebM(fps);
+                }
+            } catch (error) {
+                console.error('Export error:', error);
+                alert('Export failed: ' + error.message);
+            }
+            
+            isExporting = false;
+            exportProgress.classList.remove('active');
+            modalButtons.style.display = 'flex';
+            exportModal.classList.remove('active');
+            progressBarFill.style.width = '0%';
+        });
+
+        // Helper function to seek video and wait for frame to be ready
+        function seekAndWait(videoElement, time) {
+            return new Promise((resolve) => {
+                const waitForFrame = () => {
+                    // Wait until we have enough data
+                    if (videoElement.readyState >= 2) {
+                        // Additional delay to ensure frame is decoded
+                        requestAnimationFrame(() => {
+                            requestAnimationFrame(resolve);
+                        });
+                    } else {
+                        // Keep waiting
+                        setTimeout(waitForFrame, 10);
+                    }
+                };
+                
+                const onSeeked = () => {
+                    videoElement.removeEventListener('seeked', onSeeked);
+                    waitForFrame();
+                };
+                
+                // If already at the target time (within tolerance)
+                if (Math.abs(videoElement.currentTime - time) < 0.01) {
+                    waitForFrame();
+                    return;
+                }
+                
+                videoElement.addEventListener('seeked', onSeeked);
+                videoElement.currentTime = time;
+            });
+        }
+        
+        // Capture the current frame with chroma key applied
+        function captureFrame(srcVideo, destCanvas, destCtx, setDimensions = true) {
+            const width = srcVideo.videoWidth;
+            const height = srcVideo.videoHeight;
+            
+            if (setDimensions) {
+                destCanvas.width = width;
+                destCanvas.height = height;
+            } else {
+                // Clear the canvas without resetting dimensions
+                destCtx.clearRect(0, 0, destCanvas.width, destCanvas.height);
+            }
+            
+            // Draw the video frame
+            destCtx.drawImage(srcVideo, 0, 0, width, height);
+            
+            // Apply chroma key
+            const imageData = destCtx.getImageData(0, 0, width, height);
+            const processedData = applyChromaKey(imageData);
+            destCtx.putImageData(processedData, 0, 0);
+            
+            return destCanvas;
+        }
+
+        // Export as frame-by-frame WebP images in a ZIP
+        async function exportFrames(fps) {
+            const zip = new JSZip();
+            const duration = video.duration;
+            const totalFrames = Math.floor(duration * fps);
+            
+            // Create a dedicated export canvas
+            const exportCanvas = document.createElement('canvas');
+            const exportCtx = exportCanvas.getContext('2d', { willReadFrequently: true });
+            
+            const canvasWidth = video.videoWidth;
+            const canvasHeight = video.videoHeight;
+            
+            if (canvasWidth === 0 || canvasHeight === 0) {
+                throw new Error('Video dimensions not available');
+            }
+            
+            // Pause video and reset to start
+            video.pause();
+            await seekAndWait(video, 0);
+            
+            for (let i = 0; i < totalFrames; i++) {
+                // Seek to frame time
+                const frameTime = i / fps;
+                await seekAndWait(video, frameTime);
+                
+                // Capture and process the frame
+                captureFrame(video, exportCanvas, exportCtx);
+                
+                // Get WebP data
+                const dataUrl = exportCanvas.toDataURL('image/webp', 0.9);
+                const base64Data = dataUrl.split(',')[1];
+                
+                // Add to zip with padded frame number
+                const frameName = `frame_${String(i).padStart(5, '0')}.webp`;
+                zip.file(frameName, base64Data, { base64: true });
+                
+                // Update progress
+                const progress = Math.round(((i + 1) / totalFrames) * 100);
+                progressBarFill.style.width = progress + '%';
+                progressText.textContent = `Exporting frames... ${progress}% (${i + 1}/${totalFrames})`;
+                
+                // Allow UI to update
+                await new Promise(resolve => setTimeout(resolve, 10));
+            }
+            
+            // Generate and download ZIP
+            progressText.textContent = 'Creating ZIP file...';
+            const zipBlob = await zip.generateAsync({ type: 'blob' });
+            
+            const link = document.createElement('a');
+            link.href = URL.createObjectURL(zipBlob);
+            link.download = `frames_export_${getTimestamp()}.zip`;
+            link.style.display = 'none';
+            document.body.appendChild(link);
+            link.click();
+            
+            // Save first frame to localStorage for preview
+            await seekAndWait(video, 0);
+            captureFrame(video, exportCanvas, exportCtx);
+            const previewDataUrl = exportCanvas.toDataURL('image/webp', 0.9);
+            try {
+                localStorage.setItem('lastExportData', previewDataUrl);
+                localStorage.setItem('lastExportType', 'image/webp');
+                previewBtn.disabled = false;
+            } catch (e) {
+                console.log('Could not save preview to localStorage:', e);
+            }
+            
+            // Clean up after a delay to ensure download starts
+            setTimeout(() => {
+                document.body.removeChild(link);
+                URL.revokeObjectURL(link.href);
+            }, 1000);
+            
+            progressText.textContent = 'Export complete!';
+        }
+
+        // Export as WebM video with transparency
+        async function exportWebM(fps) {
+            const duration = video.duration;
+            const totalFrames = Math.floor(duration * fps);
+            
+            // Store dimensions
+            const canvasWidth = video.videoWidth;
+            const canvasHeight = video.videoHeight;
+            
+            if (canvasWidth === 0 || canvasHeight === 0) {
+                throw new Error('Video dimensions not available');
+            }
+            
+            // Create a new canvas for recording (don't change dimensions after stream starts)
+            const recordCanvas = document.createElement('canvas');
+            recordCanvas.width = canvasWidth;
+            recordCanvas.height = canvasHeight;
+            const recordCtx = recordCanvas.getContext('2d', { willReadFrequently: true });
+            
+            // Check if MediaRecorder supports VP9 with alpha
+            let mimeType = 'video/webm;codecs=vp9';
+            if (!MediaRecorder.isTypeSupported(mimeType)) {
+                mimeType = 'video/webm;codecs=vp8';
+            }
+            if (!MediaRecorder.isTypeSupported(mimeType)) {
+                mimeType = 'video/webm';
+            }
+            
+            const stream = recordCanvas.captureStream(fps);
+            const mediaRecorder = new MediaRecorder(stream, { mimeType });
+            const chunks = [];
+            
+            mediaRecorder.ondataavailable = (e) => {
+                if (e.data.size > 0) {
+                    chunks.push(e.data);
+                }
+            };
+            
+            // Start recording
+            mediaRecorder.start();
+            
+            // Pause video and reset to start
+            video.pause();
+            await seekAndWait(video, 0);
+            
+            // Calculate frame interval for target FPS
+            const frameInterval = 1000 / fps;
+            
+            for (let i = 0; i < totalFrames; i++) {
+                const frameStartTime = performance.now();
+                
+                // Seek to frame time
+                const frameTime = i / fps;
+                await seekAndWait(video, frameTime);
+                
+                // Capture and process frame (don't reset dimensions to preserve stream)
+                captureFrame(video, recordCanvas, recordCtx, false);
+                
+                // Update progress
+                const progress = Math.round(((i + 1) / totalFrames) * 100);
+                progressBarFill.style.width = progress + '%';
+                progressText.textContent = `Recording... ${progress}% (${i + 1}/${totalFrames})`;
+                
+                // Wait the correct amount of time to achieve target FPS
+                // The MediaRecorder captures based on real-time, so we need proper timing
+                const elapsed = performance.now() - frameStartTime;
+                const waitTime = Math.max(frameInterval - elapsed, 16); // At least 16ms for UI updates
+                await new Promise(resolve => setTimeout(resolve, waitTime));
+            }
+            
+            // Stop recording and wait for data
+            progressText.textContent = 'Finalizing video...';
+            
+            await new Promise(resolve => {
+                mediaRecorder.onstop = resolve;
+                mediaRecorder.stop();
+            });
+            
+            // Create and download video
+            const blob = new Blob(chunks, { type: mimeType });
+            const link = document.createElement('a');
+            link.href = URL.createObjectURL(blob);
+            link.download = `video_export_${getTimestamp()}.webm`;
+            link.style.display = 'none';
+            document.body.appendChild(link);
+            link.click();
+            
+            // Save to localStorage for preview (try video first, fall back to frame)
+            try {
+                const reader = new FileReader();
+                reader.onload = () => {
+                    try {
+                        localStorage.setItem('lastExportData', reader.result);
+                        localStorage.setItem('lastExportType', mimeType);
+                        previewBtn.disabled = false;
+                    } catch (e) {
+                        // Video too large, save first frame instead
+                        console.log('Video too large for localStorage, saving frame instead');
+                        saveFirstFrameForPreview();
+                    }
+                };
+                reader.readAsDataURL(blob);
+            } catch (e) {
+                saveFirstFrameForPreview();
+            }
+            
+            async function saveFirstFrameForPreview() {
+                await seekAndWait(video, 0);
+                captureFrame(video, recordCanvas, recordCtx, false);
+                const previewDataUrl = recordCanvas.toDataURL('image/webp', 0.9);
+                try {
+                    localStorage.setItem('lastExportData', previewDataUrl);
+                    localStorage.setItem('lastExportType', 'image/webp');
+                    previewBtn.disabled = false;
+                } catch (e) {
+                    console.log('Could not save preview to localStorage:', e);
+                }
+            }
+            
+            // Clean up after a delay to ensure download starts
+            setTimeout(() => {
+                document.body.removeChild(link);
+                URL.revokeObjectURL(link.href);
+            }, 1000);
+            
+            progressText.textContent = 'Export complete!';
+        }
     </script>
 </body>
 </html>
