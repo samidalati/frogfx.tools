@@ -73,6 +73,17 @@
             display: flex;
             align-items: center;
             justify-content: center;
+            gap: 15px;
+            overflow: hidden;
+            padding: 0 15px;
+        }
+
+        .media-wrapper {
+            flex: 1;
+            min-width: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
             overflow: hidden;
         }
 
@@ -99,6 +110,34 @@
             text-align: center;
             font-size: 12px;
             line-height: 1.4;
+        }
+
+        .file-info {
+            color: white;
+            text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.3);
+            text-align: left;
+            font-size: 13px;
+            line-height: 1.8;
+            background: rgba(255, 255, 255, 0.2);
+            padding: 15px 20px;
+            border-radius: 8px;
+            backdrop-filter: blur(10px);
+            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
+            min-width: 200px;
+            max-width: 250px;
+            flex-shrink: 0;
+            align-self: flex-start;
+            margin-top: 0;
+        }
+
+        .file-info strong {
+            font-weight: 600;
+            display: inline-block;
+            min-width: 90px;
+        }
+
+        .file-info-item {
+            margin: 8px 0;
         }
 
         .video-controls {
@@ -148,6 +187,22 @@
                 font-size: 12px;
             }
 
+            .media-container {
+                gap: 10px;
+                padding: 0 10px;
+            }
+
+            .file-info {
+                padding: 10px 15px;
+                font-size: 12px;
+                min-width: 160px;
+                max-width: 200px;
+            }
+
+            .file-info strong {
+                min-width: 75px;
+            }
+
             .bottom-section {
                 gap: 6px;
                 padding-top: 8px;
@@ -160,6 +215,20 @@
             .video-controls button {
                 padding: 6px 12px;
                 font-size: 12px;
+            }
+        }
+
+        /* Very small screens - stack vertically */
+        @media (max-width: 600px) {
+            .media-container {
+                flex-direction: column;
+                gap: 10px;
+            }
+
+            .file-info {
+                align-self: center;
+                max-width: 100%;
+                width: 100%;
             }
         }
     </style>
@@ -175,8 +244,14 @@
     </div>
 
     <div class="media-container">
-        <img id="mediaDisplay" style="display: none;" alt="Loaded media">
-        <video id="videoDisplay" style="display: none;" loop></video>
+        <div class="media-wrapper">
+            <img id="mediaDisplay" style="display: none;" alt="Loaded media">
+            <video id="videoDisplay" style="display: none;" loop></video>
+        </div>
+        <div class="file-info" id="fileInfo" style="display: none;">
+            <div class="file-info-item"><strong>File Size:</strong> <span id="fileSize">-</span></div>
+            <div class="file-info-item"><strong>Resolution:</strong> <span id="fileResolution">-</span></div>
+        </div>
     </div>
 
     <div class="bottom-section">
@@ -194,6 +269,44 @@
         const videoControls = document.getElementById('videoControls');
         const playPauseBtn = document.getElementById('playPauseBtn');
         const restartBtn = document.getElementById('restartBtn');
+        const fileInfo = document.getElementById('fileInfo');
+        const fileSizeSpan = document.getElementById('fileSize');
+        const fileResolutionSpan = document.getElementById('fileResolution');
+
+        // Format file size in human-readable format
+        function formatFileSize(bytes) {
+            if (bytes === 0) return '0 Bytes';
+            const k = 1024;
+            const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return Math.round((bytes / Math.pow(k, i)) * 100) / 100 + ' ' + sizes[i];
+        }
+
+        // Update file info display
+        function updateFileInfo(file, width, height) {
+            if (file) {
+                fileSizeSpan.textContent = formatFileSize(file.size);
+            } else {
+                // For localStorage data, estimate size from data URL
+                const exportData = localStorage.getItem('lastExportData');
+                if (exportData) {
+                    // Approximate size: base64 is ~33% larger than binary
+                    const base64Length = exportData.length - (exportData.indexOf(',') + 1);
+                    const estimatedBytes = Math.floor(base64Length * 0.75);
+                    fileSizeSpan.textContent = formatFileSize(estimatedBytes) + ' (approx)';
+                } else {
+                    fileSizeSpan.textContent = '-';
+                }
+            }
+            
+            if (width && height) {
+                fileResolutionSpan.textContent = `${width} × ${height} pixels`;
+            } else {
+                fileResolutionSpan.textContent = '-';
+            }
+            
+            fileInfo.style.display = 'block';
+        }
 
         fileInput.addEventListener('change', (e) => {
             const file = e.target.files[0];
@@ -208,6 +321,12 @@
                 videoDisplay.style.display = 'block';
                 videoDisplay.src = url;
                 videoControls.classList.add('visible');
+                
+                // Wait for video metadata to get dimensions
+                videoDisplay.addEventListener('loadedmetadata', () => {
+                    updateFileInfo(file, videoDisplay.videoWidth, videoDisplay.videoHeight);
+                }, { once: true });
+                
                 videoDisplay.play();
                 updatePlayPauseBtn();
             } else {
@@ -217,6 +336,11 @@
                 videoControls.classList.remove('visible');
                 mediaDisplay.style.display = 'block';
                 mediaDisplay.src = url;
+                
+                // Wait for image to load to get dimensions
+                mediaDisplay.addEventListener('load', () => {
+                    updateFileInfo(file, mediaDisplay.naturalWidth, mediaDisplay.naturalHeight);
+                }, { once: true });
             }
         });
 
@@ -258,6 +382,12 @@
                     videoDisplay.style.display = 'block';
                     videoDisplay.src = exportData;
                     videoControls.classList.add('visible');
+                    
+                    // Wait for video metadata to get dimensions
+                    videoDisplay.addEventListener('loadedmetadata', () => {
+                        updateFileInfo(null, videoDisplay.videoWidth, videoDisplay.videoHeight);
+                    }, { once: true });
+                    
                     videoDisplay.play();
                 } else {
                     videoDisplay.style.display = 'none';
@@ -265,6 +395,11 @@
                     videoControls.classList.remove('visible');
                     mediaDisplay.style.display = 'block';
                     mediaDisplay.src = exportData;
+                    
+                    // Wait for image to load to get dimensions
+                    mediaDisplay.addEventListener('load', () => {
+                        updateFileInfo(null, mediaDisplay.naturalWidth, mediaDisplay.naturalHeight);
+                    }, { once: true });
                 }
             }
         }
