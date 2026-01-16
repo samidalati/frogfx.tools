@@ -1,6 +1,6 @@
 # Chroma Key Green Screen Export with Alpha Channel
 
-A web-based tool for removing green screen backgrounds from videos and images, with support for exporting transparent backgrounds in multiple formats.
+A web-based tool for removing green screen backgrounds from videos with support for exporting to webp frames, gif, webm videos with transparent backgrounds
 
 ## Features
 
