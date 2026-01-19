@@ -1664,17 +1664,63 @@
             video.pause();
             await seekAndWait(video, 0);
             
+            // Ensure videoCanvas has correct dimensions by redrawing first frame
+            redrawFrame();
+            await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+            
+            // Get actual dimensions from videoCanvas
+            const actualWidth = videoCanvas.width;
+            const actualHeight = videoCanvas.height;
+            
+            if (actualWidth === 0 || actualHeight === 0) {
+                throw new Error('Canvas dimensions not available after frame render');
+            }
+            
+            // Set export canvas dimensions
+            exportCanvas.width = actualWidth;
+            exportCanvas.height = actualHeight;
+            
             for (let i = 0; i < totalFrames; i++) {
                 // Seek to frame time
                 const frameTime = i / fps;
                 await seekAndWait(video, frameTime);
                 
-                // Capture and process the frame
-                captureFrame(video, exportCanvas, exportCtx);
+                // Redraw the frame on videoCanvas (this is what the UI uses)
+                redrawFrame();
+                
+                // Wait for canvas to update - use multiple animation frames to ensure rendering
+                await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+                
+                // Copy from videoCanvas (which has the chroma-keyed frame) to exportCanvas
+                exportCtx.clearRect(0, 0, exportCanvas.width, exportCanvas.height);
+                exportCtx.drawImage(videoCanvas, 0, 0);
                 
                 // Get WebP data
                 const dataUrl = exportCanvas.toDataURL('image/webp', 0.9);
                 const base64Data = dataUrl.split(',')[1];
+                
+                // Validate frame is not empty (empty frames are ~3KB)
+                const minFrameSize = 5000; // 5KB minimum (empty frames are ~3KB)
+                const frameSize = (base64Data.length * 3) / 4; // Approximate binary size from base64
+                
+                if (frameSize < minFrameSize && i < 3) {
+                    console.warn(`Frame ${i} appears to be empty (${(frameSize / 1024).toFixed(1)} KB). Check chroma key settings.`);
+                }
+                
+                // Validate frame has content by checking pixel data
+                const imageData = exportCtx.getImageData(0, 0, exportCanvas.width, exportCanvas.height);
+                const data = imageData.data;
+                let visiblePixelCount = 0;
+                for (let j = 0; j < data.length; j += 4) {
+                    if (data[j + 3] >= 128) {
+                        visiblePixelCount++;
+                    }
+                }
+                const visiblePercentage = (visiblePixelCount / (data.length / 4)) * 100;
+                
+                if (visiblePercentage < 1 && i < 3) {
+                    console.warn(`Frame ${i} has only ${visiblePercentage.toFixed(2)}% visible pixels. Frame may appear empty.`);
+                }
                 
                 // Add to zip with padded frame number
                 const frameName = `frame_${String(i).padStart(5, '0')}.webp`;
@@ -1699,7 +1745,10 @@
             
             // Save first frame to localStorage for preview
             await seekAndWait(video, 0);
-            captureFrame(video, exportCanvas, exportCtx);
+            redrawFrame();
+            await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+            exportCtx.clearRect(0, 0, exportCanvas.width, exportCanvas.height);
+            exportCtx.drawImage(videoCanvas, 0, 0);
             const previewDataUrl = exportCanvas.toDataURL('image/webp', 0.9);
             try {
                 localStorage.setItem('lastExportData', previewDataUrl);
