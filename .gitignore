@@ -1,3 +1,6 @@
+# System files
+.DS_Store
+
 # Image formats
 *.jpg
 *.jpeg
@@ -42,3 +45,5 @@
 *.rmvb
 *.divx
 *.xvid
+test_frames/
+*.mov

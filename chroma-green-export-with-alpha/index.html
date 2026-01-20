@@ -7,6 +7,13 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/gif.js/0.2.0/gif.js"></script>
+    <script src="https://unpkg.com/@ffmpeg/ffmpeg@0.12.15/dist/umd/ffmpeg.js"></script>
+    <script src="https://unpkg.com/@ffmpeg/util@0.12.1/dist/umd/util.js"></script>
+    <!-- Note: @ffmpeg/core@0.12.10 is loaded dynamically at runtime -->
+    <!-- Export modules -->
+    <script src="export-webp-frames.js"></script>
+    <script src="export-webm-basic.js"></script>
+    <script src="export-gif.js"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
     <style>
         * {
@@ -819,10 +826,12 @@
                 <label for="exportFormat">Export Format:</label>
                 <select id="exportFormat">
                     <option value="frames">Frame by Frame (ZIP of WebP images)</option>
-                    <option value="webm">Animated Video (WebM with transparency)</option>
+                    <option value="webm">Animated Video (WebM VP9 - Basic)</option>
+                    <option value="webm-vp9-alpha">Animated Video (WebM VP9 with Alpha - Chrome)</option>
+                    <option value="hevc-alpha">Animated Video (HEVC with Alpha - iOS Safari)</option>
                     <option value="gif">Animated GIF</option>
                 </select>
-                <small>WebP/WebM support transparency; GIF has 1-bit transparency</small>
+                <small>WebM VP9 Alpha works best in Chrome; HEVC Alpha works in iOS Safari</small>
             </div>
 
             <div class="export-progress" id="exportProgress">
@@ -1506,10 +1515,9 @@
 
         // Cross-browser blob download function
         async function downloadBlob(blob, filename) {
-            // Force download by using octet-stream MIME type
-            // This prevents Chrome from trying to "open" video files
-            const downloadBlob = new Blob([blob], { type: 'application/octet-stream' });
-            const url = URL.createObjectURL(downloadBlob);
+            // Use the original blob with its proper MIME type
+            // The download attribute forces download, no need to change MIME type
+            const url = URL.createObjectURL(blob);
             
             // Create anchor with download attribute
             const a = document.createElement('a');
@@ -1520,19 +1528,14 @@
             // Append to body (required for Firefox)
             document.body.appendChild(a);
             
-            // Use a simulated click via MouseEvent for better compatibility
-            const event = new MouseEvent('click', {
-                view: window,
-                bubbles: true,
-                cancelable: true
-            });
-            a.dispatchEvent(event);
+            // Click to download
+            a.click();
             
-            // Cleanup
+            // Cleanup after a delay
             setTimeout(() => {
                 document.body.removeChild(a);
                 URL.revokeObjectURL(url);
-            }, 100);
+            }, 1000);
         }
 
         // Open export modal
@@ -1569,11 +1572,15 @@
             
             try {
                 if (format === 'frames') {
-                    await exportFrames(fps);
+                    await exportWebPFrames(video, videoCanvas, applyChromaKey, redrawFrame, seekAndWait, downloadBlob, getTimestamp, progressBarFill, progressText, previewBtn, isExporting);
                 } else if (format === 'webm') {
-                    await exportWebM(fps);
+                    await exportWebMBasic(video, videoCanvas, seekAndWait, downloadBlob, getTimestamp, progressBarFill, progressText, previewBtn, isExporting);
+                } else if (format === 'webm-vp9-alpha') {
+                    await exportWebMVP9Alpha(fps);
+                } else if (format === 'hevc-alpha') {
+                    await exportHEVCAlpha(fps);
                 } else if (format === 'gif') {
-                    await exportGIF(fps);
+                    await exportGIF(video, videoCanvas, applyChromaKey, redrawFrame, seekAndWait, downloadBlob, getTimestamp, progressBarFill, progressText, previewBtn, isExporting, isPlaying, drawFrame);
                 }
             } catch (error) {
                 console.error('Export error:', error);
@@ -1643,126 +1650,13 @@
             return destCanvas;
         }
 
-        // Export as frame-by-frame WebP images in a ZIP
-        async function exportFrames(fps) {
-            const zip = new JSZip();
-            const duration = video.duration;
-            const totalFrames = Math.floor(duration * fps);
-            
-            // Create a dedicated export canvas
-            const exportCanvas = document.createElement('canvas');
-            const exportCtx = exportCanvas.getContext('2d', { willReadFrequently: true });
-            
-            const canvasWidth = video.videoWidth;
-            const canvasHeight = video.videoHeight;
-            
-            if (canvasWidth === 0 || canvasHeight === 0) {
-                throw new Error('Video dimensions not available');
-            }
-            
-            // Pause video and reset to start
-            video.pause();
-            await seekAndWait(video, 0);
-            
-            // Ensure videoCanvas has correct dimensions by redrawing first frame
-            redrawFrame();
-            await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-            
-            // Get actual dimensions from videoCanvas
-            const actualWidth = videoCanvas.width;
-            const actualHeight = videoCanvas.height;
-            
-            if (actualWidth === 0 || actualHeight === 0) {
-                throw new Error('Canvas dimensions not available after frame render');
-            }
-            
-            // Set export canvas dimensions
-            exportCanvas.width = actualWidth;
-            exportCanvas.height = actualHeight;
-            
-            for (let i = 0; i < totalFrames; i++) {
-                // Seek to frame time
-                const frameTime = i / fps;
-                await seekAndWait(video, frameTime);
-                
-                // Redraw the frame on videoCanvas (this is what the UI uses)
-                redrawFrame();
-                
-                // Wait for canvas to update - use multiple animation frames to ensure rendering
-                await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-                
-                // Copy from videoCanvas (which has the chroma-keyed frame) to exportCanvas
-                exportCtx.clearRect(0, 0, exportCanvas.width, exportCanvas.height);
-                exportCtx.drawImage(videoCanvas, 0, 0);
-                
-                // Get WebP data
-                const dataUrl = exportCanvas.toDataURL('image/webp', 0.9);
-                const base64Data = dataUrl.split(',')[1];
-                
-                // Validate frame is not empty (empty frames are ~3KB)
-                const minFrameSize = 5000; // 5KB minimum (empty frames are ~3KB)
-                const frameSize = (base64Data.length * 3) / 4; // Approximate binary size from base64
-                
-                if (frameSize < minFrameSize && i < 3) {
-                    console.warn(`Frame ${i} appears to be empty (${(frameSize / 1024).toFixed(1)} KB). Check chroma key settings.`);
-                }
-                
-                // Validate frame has content by checking pixel data
-                const imageData = exportCtx.getImageData(0, 0, exportCanvas.width, exportCanvas.height);
-                const data = imageData.data;
-                let visiblePixelCount = 0;
-                for (let j = 0; j < data.length; j += 4) {
-                    if (data[j + 3] >= 128) {
-                        visiblePixelCount++;
-                    }
-                }
-                const visiblePercentage = (visiblePixelCount / (data.length / 4)) * 100;
-                
-                if (visiblePercentage < 1 && i < 3) {
-                    console.warn(`Frame ${i} has only ${visiblePercentage.toFixed(2)}% visible pixels. Frame may appear empty.`);
-                }
-                
-                // Add to zip with padded frame number
-                const frameName = `frame_${String(i).padStart(5, '0')}.webp`;
-                zip.file(frameName, base64Data, { base64: true });
-                
-                // Update progress
-                const progress = Math.round(((i + 1) / totalFrames) * 100);
-                progressBarFill.style.width = progress + '%';
-                progressText.textContent = `Exporting frames... ${progress}% (${i + 1}/${totalFrames})`;
-                
-                // Allow UI to update
-                await new Promise(resolve => setTimeout(resolve, 10));
-            }
-            
-            // Generate and download ZIP
-            progressText.textContent = 'Creating ZIP file...';
-            const zipBlob = await zip.generateAsync({ type: 'blob' });
-            const zipFilename = `frames_export_${getTimestamp()}.zip`;
-            
-            // Download using cross-browser compatible method
-            await downloadBlob(zipBlob, zipFilename);
-            
-            // Save first frame to localStorage for preview
-            await seekAndWait(video, 0);
-            redrawFrame();
-            await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-            exportCtx.clearRect(0, 0, exportCanvas.width, exportCanvas.height);
-            exportCtx.drawImage(videoCanvas, 0, 0);
-            const previewDataUrl = exportCanvas.toDataURL('image/webp', 0.9);
-            try {
-                localStorage.setItem('lastExportData', previewDataUrl);
-                localStorage.setItem('lastExportType', 'image/webp');
-                previewBtn.disabled = false;
-            } catch (e) {
-                console.log('Could not save preview to localStorage:', e);
-            }
-            
-            progressText.textContent = 'Export complete!';
-        }
+        // Export functions are now in separate modules:
+        // - export-webp-frames.js
+        // - export-webm-basic.js
+        // - export-gif.js
 
-        // Export as WebM video with transparency using MediaRecorder
-        async function exportWebM(fps) {
+        // Export as WebM VP9 with alpha channel using FFmpeg (disabled - requires self-hosted FFmpeg)
+        async function exportWebMFFmpeg(fps) {
             const duration = video.duration;
             
             // Store dimensions
@@ -1869,242 +1763,477 @@
             progressText.textContent = 'Export complete!';
         }
 
-        // Export as animated GIF
-        async function exportGIF(fps) {
-            const duration = video.duration;
-            const totalFrames = Math.floor(duration * fps);
-            const frameDelay = 1000 / fps; // Delay between frames in ms
+        // Export as WebM VP9 with alpha channel using FFmpeg
+        async function exportWebMVP9Alpha(fps) {
+            // FFmpeg-based exports are not available due to CORS restrictions with workers
+            // This would require hosting FFmpeg files on the same domain
+            throw new Error('WebM VP9 Alpha export requires FFmpeg which cannot be loaded from a CDN due to browser security restrictions. Please use "WebM VP9 - Basic" instead, which also supports transparency.');
             
-            // Store dimensions
-            const canvasWidth = video.videoWidth;
-            const canvasHeight = video.videoHeight;
+            // Use UMD build loaded via script tags (avoids ES module worker issues)
+            // The UMD build exposes FFmpeg on window object
+            let FFmpegClass, FFmpegUtil;
             
-            if (canvasWidth === 0 || canvasHeight === 0) {
-                throw new Error('Video dimensions not available');
+            // Check for UMD build (loaded via script tags)
+            // The UMD build exposes FFmpeg as window.FFmpegWASM.FFmpeg
+            if (typeof window !== 'undefined') {
+                if (window.FFmpeg) {
+                    FFmpegClass = window.FFmpeg;
+                    FFmpegUtil = window.FFmpegUtil || {};
+                } else if (window.FFmpegWASM && window.FFmpegWASM.FFmpeg) {
+                    FFmpegClass = window.FFmpegWASM.FFmpeg;
+                    FFmpegUtil = window.FFmpegWASM.FFmpegUtil || window.FFmpegUtil || {};
+                }
             }
             
-            // Create export canvas - will be resized to match videoCanvas
-            const exportCanvas = document.createElement('canvas');
-            const exportCtx = exportCanvas.getContext('2d', { willReadFrequently: true });
+            if (!FFmpegClass && typeof FFmpeg !== 'undefined') {
+                // Fallback to global
+                FFmpegClass = FFmpeg;
+                FFmpegUtil = {};
+            }
             
-            // Create GIF encoder with inline worker
-            // Fetch and create blob URL for worker to avoid CORS issues
-            let workerBlob;
+            if (!FFmpegClass) {
+                // Last resort: try ES modules
+                try {
+                    const ffmpegModule = await import('https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.12.15/+esm');
+                    const utilModule = await import('https://cdn.jsdelivr.net/npm/@ffmpeg/util@0.12.1/+esm');
+                    FFmpegClass = ffmpegModule.FFmpeg;
+                    FFmpegUtil = utilModule;
+                } catch (e) {
+                    throw new Error('FFmpeg library not loaded. Please refresh the page and ensure scripts are loaded.');
+                }
+            }
+            
+            // Get utility functions, with fallbacks
+            const fetchFile = FFmpegUtil?.fetchFile || (async (url) => {
+                const response = await fetch(url);
+                return await response.arrayBuffer();
+            });
+            const toBlobURL = FFmpegUtil?.toBlobURL || (async (data, mimeType) => {
+                if (data instanceof ArrayBuffer) {
+                    const blob = new Blob([data], { type: mimeType });
+                    return URL.createObjectURL(blob);
+                }
+                // If it's already a URL, return it
+                return data;
+            });
+            const ffmpeg = new FFmpegClass();
+            
+            // Set up logging
+            ffmpeg.on('log', ({ message }) => {
+                console.log(message);
+            });
+            
+            progressText.textContent = 'Downloading FFmpeg (this may take a moment)...';
+            
+            // Load FFmpeg core and wasm using ESM single-threaded version
+            // This avoids worker issues entirely
+            const coreBaseURL = 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/esm';
+            
             try {
-                const workerResponse = await fetch('https://cdnjs.cloudflare.com/ajax/libs/gif.js/0.2.0/gif.worker.js');
-                const workerText = await workerResponse.text();
-                workerBlob = URL.createObjectURL(new Blob([workerText], { type: 'application/javascript' }));
-            } catch (e) {
-                console.error('Failed to load GIF worker:', e);
-                progressText.textContent = 'Failed to initialize GIF encoder';
-                return;
+                // Fetch all required files
+                const [coreResponse, wasmResponse] = await Promise.all([
+                    fetch(`${coreBaseURL}/ffmpeg-core.js`),
+                    fetch(`${coreBaseURL}/ffmpeg-core.wasm`)
+                ]);
+                
+                if (!coreResponse.ok || !wasmResponse.ok) {
+                    throw new Error('Failed to download FFmpeg core files');
+                }
+                
+                // Convert to blob URLs to avoid CORS issues
+                const coreText = await coreResponse.text();
+                const wasmBuffer = await wasmResponse.arrayBuffer();
+                
+                const coreBlob = new Blob([coreText], { type: 'text/javascript' });
+                const wasmBlob = new Blob([wasmBuffer], { type: 'application/wasm' });
+                
+                const coreURL = URL.createObjectURL(coreBlob);
+                const wasmURL = URL.createObjectURL(wasmBlob);
+                
+                progressText.textContent = 'Loading FFmpeg...';
+                
+                await ffmpeg.load({
+                    coreURL: coreURL,
+                    wasmURL: wasmURL,
+                });
+                
+                console.log('FFmpeg loaded successfully');
+            } catch (loadError) {
+                console.error('FFmpeg load error:', loadError);
+                throw new Error('Failed to load FFmpeg: ' + loadError.message);
             }
             
-            // Reset video to start
-            const wasPlaying = isPlaying;
+            // Pause video and reset to start
             video.pause();
             await seekAndWait(video, 0);
             
-            // Ensure videoCanvas has correct dimensions by redrawing first frame
+            // Ensure videoCanvas has correct dimensions
             redrawFrame();
             await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
             
-            // Get actual dimensions from videoCanvas
             const actualWidth = videoCanvas.width;
             const actualHeight = videoCanvas.height;
             
-            if (actualWidth === 0 || actualHeight === 0) {
-                throw new Error('Canvas dimensions not available after frame render');
-            }
-            
-            // Set export canvas dimensions
+            // Create export canvas
+            const exportCanvas = document.createElement('canvas');
             exportCanvas.width = actualWidth;
             exportCanvas.height = actualHeight;
+            const exportCtx = exportCanvas.getContext('2d', { willReadFrequently: true });
             
-            const gif = new GIF({
-                workers: 2,
-                quality: 10,
-                width: actualWidth,
-                height: actualHeight,
-                workerScript: workerBlob,
-                transparent: 0xFF00FF, // Magenta as transparent color (less likely to conflict)
-                background: '#FF00FF'
-            });
+            progressText.textContent = 'Capturing frames...';
             
-            // Play video and capture frames as it renders (similar to WebM export)
-            let frameIndex = 0;
-            let lastCaptureTime = 0;
-            const frameInterval = 1000 / fps; // Time between frames in ms
-            
-            // Start playing the video - ensure animation loop is running
-            video.currentTime = 0;
-            await seekAndWait(video, 0);
-            
-            // Ensure the animation loop is running to update videoCanvas
-            if (!isPlaying) {
-                isPlaying = true;
-                drawFrame(); // Start the animation loop
+            // Capture frames as PNG with alpha
+            const frameFiles = [];
+            for (let i = 0; i < totalFrames; i++) {
+                if (!isExporting) break;
+                
+                const time = i / fps;
+                await seekAndWait(video, time);
+                redrawFrame();
+                await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+                
+                exportCtx.clearRect(0, 0, exportCanvas.width, exportCanvas.height);
+                exportCtx.drawImage(videoCanvas, 0, 0);
+                
+                // Convert to PNG with alpha
+                const pngData = exportCanvas.toDataURL('image/png');
+                const frameName = `frame_${String(i).padStart(5, '0')}.png`;
+                const binaryString = atob(pngData.split(',')[1]);
+                const bytes = new Uint8Array(binaryString.length);
+                for (let j = 0; j < binaryString.length; j++) {
+                    bytes[j] = binaryString.charCodeAt(j);
+                }
+                
+                await ffmpeg.writeFile(frameName, bytes);
+                frameFiles.push(frameName);
+                
+                const progress = Math.round(((i + 1) / totalFrames) * 50);
+                progressBarFill.style.width = progress + '%';
+                progressText.textContent = `Capturing frames... ${progress}% (${i + 1}/${totalFrames})`;
+                
+                await new Promise(resolve => setTimeout(resolve, 10));
             }
-            
-            video.play();
-            
-            // Capture frames as video plays
-            await new Promise((resolve) => {
-                const captureFrame = () => {
-                    if (!isExporting || video.ended || video.currentTime >= duration - 0.1) {
-                        video.pause();
-                        resolve();
-                        return;
-                    }
-                    
-                    const currentTime = video.currentTime * 1000; // Convert to ms
-                    
-                    // Capture frame at the desired FPS interval
-                    if (currentTime - lastCaptureTime >= frameInterval) {
-                        lastCaptureTime = currentTime;
-                        
-                        // videoCanvas should already be updated by the drawFrame animation loop
-                        // Wait for next frame to ensure canvas is updated
-                        requestAnimationFrame(() => {
-                            requestAnimationFrame(() => {
-                            // Ensure exportCanvas matches videoCanvas dimensions
-                            if (exportCanvas.width !== videoCanvas.width || exportCanvas.height !== videoCanvas.height) {
-                                exportCanvas.width = videoCanvas.width;
-                                exportCanvas.height = videoCanvas.height;
-                            }
-                            
-                            // Copy from videoCanvas (which has the chroma-keyed frame) to exportCanvas
-                            exportCtx.clearRect(0, 0, exportCanvas.width, exportCanvas.height);
-                            exportCtx.drawImage(videoCanvas, 0, 0);
-                            
-                            // For GIF: replace transparent pixels with the key color (GIF only supports 1-bit transparency)
-                            const imageData = exportCtx.getImageData(0, 0, exportCanvas.width, exportCanvas.height);
-                            const data = imageData.data;
-                            
-                            // Count visible pixels and validate content
-                            let visiblePixelCount = 0;
-                            let totalPixels = data.length / 4;
-                            
-                            for (let j = 0; j < data.length; j += 4) {
-                                if (data[j + 3] >= 128) {
-                                    visiblePixelCount++;
-                                } else {
-                                    // Set transparent pixels to magenta (transparent key color for GIF)
-                                    data[j] = 255;     // R
-                                    data[j + 1] = 0;   // G
-                                    data[j + 2] = 255; // B
-                                    data[j + 3] = 255; // A (opaque for GIF, but will be made transparent by GIF encoder)
-                                }
-                            }
-                            
-                            // Log first few frames for debugging
-                            const visiblePercentage = (visiblePixelCount / totalPixels) * 100;
-                            if (frameIndex < 3) {
-                                console.log(`Frame ${frameIndex}: ${visiblePercentage.toFixed(2)}% visible pixels`);
-                            }
-                            
-                            exportCtx.putImageData(imageData, 0, 0);
-                            
-                            // Add frame to GIF - gif.js copies the canvas data
-                            gif.addFrame(exportCanvas, { delay: frameDelay, copy: true });
-                            
-                            frameIndex++;
-                            
-                            // Update progress
-                            const progress = Math.round((video.currentTime / duration) * 100);
-                            progressBarFill.style.width = progress + '%';
-                            progressText.textContent = `Capturing frames... ${progress}% (${frameIndex}/${totalFrames})`;
-                            });
-                        });
-                    }
-                    
-                    // Continue capturing
-                    requestAnimationFrame(captureFrame);
-                };
-                
-                // Start capturing
-                captureFrame();
-                
-                // Also handle video end event
-                video.onended = () => {
-                    video.pause();
-                    resolve();
-                };
-            });
             
             if (!isExporting) {
                 progressText.textContent = 'Export cancelled';
                 return;
             }
             
-            // Render GIF
-            progressText.textContent = 'Encoding GIF...';
+            if (frameFiles.length === 0) {
+                throw new Error('No frames captured. Please check video and try again.');
+            }
             
-            await new Promise((resolve, reject) => {
-                gif.on('finished', async (blob) => {
-                    // Clean up worker blob URL
-                    URL.revokeObjectURL(workerBlob);
-                    
-                    // Validate the exported GIF
-                    const minSize = 300 * 1024; // 300KB in bytes
-                    const fileSizeKB = blob.size / 1024;
-                    
-                    // Check if file is suspiciously small (likely empty)
-                    if (blob.size < minSize) {
-                        console.warn(`GIF file size (${blob.size} bytes) is smaller than expected minimum (${minSize} bytes). The export may be empty or corrupted.`);
-                        alert(`Warning: The exported GIF file size (${fileSizeKB.toFixed(1)} KB) is smaller than expected. The file may be empty or corrupted.`);
-                    } else {
-                        // Even if file size is large, validate by checking if it's likely empty
-                        // Large empty GIFs can still have significant file size due to encoding overhead
-                        console.log(`GIF export completed: ${fileSizeKB.toFixed(1)} KB, ${totalFrames} frames`);
-                    }
-                    
-                    const filename = `animation_export_${getTimestamp()}.gif`;
-                    await downloadBlob(blob, filename);
-                    
-                    // Save preview
-                    const reader = new FileReader();
-                    reader.onload = () => {
-                        try {
-                            localStorage.setItem('lastExportData', reader.result);
-                            localStorage.setItem('lastExportType', 'image/gif');
-                            previewBtn.disabled = false;
-                        } catch (e) {
-                            console.log('Could not save preview to localStorage:', e);
-                        }
-                    };
-                    reader.readAsDataURL(blob);
-                    
-                    resolve();
-                });
-                
-                gif.on('progress', (p) => {
-                    const progress = Math.round(p * 100);
-                    progressBarFill.style.width = progress + '%';
-                    progressText.textContent = `Encoding GIF... ${progress}%`;
-                });
-                
-                gif.render();
-            });
+            console.log(`Captured ${frameFiles.length} frames, starting encoding...`);
             
-            // Restore video playback state
-            video.pause();
-            if (!wasPlaying) {
-                // If video wasn't playing before, stop the animation loop
-                isPlaying = false;
-                if (animationFrameId) {
-                    cancelAnimationFrame(animationFrameId);
-                    animationFrameId = null;
+            progressText.textContent = 'Encoding WebM VP9 with alpha...';
+            progressBarFill.style.width = '60%';
+            
+            // Encode with VP9 and alpha channel using image2 demuxer
+            // -c:v libvpx-vp9 -pix_fmt yuva420p -profile:v 2
+            const outputName = `output_${getTimestamp()}.webm`;
+            const framePattern = 'frame_%05d.png';
+            
+            // Verify first frame exists
+            try {
+                const firstFrame = await ffmpeg.readFile(frameFiles[0]);
+                console.log(`First frame size: ${firstFrame.length} bytes`);
+            } catch (e) {
+                throw new Error(`Frame file ${frameFiles[0]} not found in FFmpeg FS: ${e.message}`);
+            }
+            
+            try {
+                await ffmpeg.exec([
+                    '-framerate', fps.toString(),
+                    '-i', framePattern,
+                    '-c:v', 'libvpx-vp9',
+                    '-pix_fmt', 'yuva420p',
+                    '-profile:v', '2',
+                    '-b:v', '0',
+                    '-crf', '30',
+                    '-auto-alt-ref', '0',
+                    '-row-mt', '1',
+                    outputName
+                ]);
+            } catch (error) {
+                console.error('FFmpeg encoding error:', error);
+                // List files to help debug
+                try {
+                    const files = await ffmpeg.listDir('/');
+                    console.log('Files after encoding attempt:', files);
+                } catch (e) {
+                    console.warn('Could not list files:', e);
                 }
-                // Redraw the current frame
-                redrawFrame();
+                throw new Error('Failed to encode video: ' + error.message);
+            }
+            
+            progressBarFill.style.width = '90%';
+            progressText.textContent = 'Finalizing...';
+            
+            // Verify output file exists
+            try {
+                const files = await ffmpeg.listDir('/');
+                const hasOutput = files.some(f => f.name === outputName || f === outputName);
+                if (!hasOutput) {
+                    console.error('Output file not found. Available files:', files);
+                    throw new Error(`Output file ${outputName} was not created by FFmpeg`);
+                }
+            } catch (e) {
+                console.warn('Could not verify output file (will try to read anyway):', e);
+            }
+            
+            // Read the output file
+            const data = await ffmpeg.readFile(outputName);
+            
+            if (!data || data.length === 0) {
+                throw new Error('Output file is empty');
+            }
+            
+            console.log(`Output file read: ${data.length} bytes`);
+            
+            // Handle different data types (Uint8Array, ArrayBuffer, etc.)
+            let blobData;
+            if (data instanceof Uint8Array) {
+                blobData = data;
+            } else if (data.buffer) {
+                blobData = data.buffer;
+            } else if (data instanceof ArrayBuffer) {
+                blobData = data;
             } else {
-                // If video was playing, resume it
-                video.play().catch(err => console.log('Could not resume playback:', err));
+                // Convert to Uint8Array if needed
+                blobData = new Uint8Array(data);
+            }
+            
+            const blob = new Blob([blobData], { type: 'video/webm' });
+            
+            if (blob.size === 0) {
+                throw new Error('Exported video file is empty. Check FFmpeg encoding.');
+            }
+            
+            console.log(`Export complete: ${(blob.size / 1024 / 1024).toFixed(2)} MB`);
+            
+            const filename = `video_export_vp9_alpha_${getTimestamp()}.webm`;
+            await downloadBlob(blob, filename);
+            
+            // Clean up
+            for (const file of frameFiles) {
+                try {
+                    await ffmpeg.deleteFile(file);
+                } catch (e) {
+                    // Ignore cleanup errors
+                }
+            }
+            try {
+                await ffmpeg.deleteFile(outputName);
+            } catch (e) {
+                // Ignore cleanup errors
             }
             
             progressText.textContent = 'Export complete!';
         }
+
+        // Export as HEVC with alpha channel for iOS Safari
+        async function exportHEVCAlpha(fps) {
+            // FFmpeg-based exports are not available due to CORS restrictions with workers
+            // This would require hosting FFmpeg files on the same domain
+            throw new Error('HEVC Alpha export requires FFmpeg which cannot be loaded from a CDN due to browser security restrictions. Please use "WebM VP9 - Basic" for Chrome or "Animated GIF" for broader compatibility.');
+            
+            // Use UMD build loaded via script tags (avoids ES module worker issues)
+            // The UMD build exposes FFmpeg on window object
+            let FFmpegClass, FFmpegUtil;
+            
+            // Check for UMD build (loaded via script tags)
+            // The UMD build exposes FFmpeg as window.FFmpegWASM.FFmpeg
+            if (typeof window !== 'undefined') {
+                if (window.FFmpeg) {
+                    FFmpegClass = window.FFmpeg;
+                    FFmpegUtil = window.FFmpegUtil || {};
+                } else if (window.FFmpegWASM && window.FFmpegWASM.FFmpeg) {
+                    FFmpegClass = window.FFmpegWASM.FFmpeg;
+                    FFmpegUtil = window.FFmpegWASM.FFmpegUtil || window.FFmpegUtil || {};
+                }
+            }
+            
+            if (!FFmpegClass && typeof FFmpeg !== 'undefined') {
+                // Fallback to global
+                FFmpegClass = FFmpeg;
+                FFmpegUtil = {};
+            }
+            
+            if (!FFmpegClass) {
+                // Last resort: try ES modules
+                try {
+                    const ffmpegModule = await import('https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.12.15/+esm');
+                    const utilModule = await import('https://cdn.jsdelivr.net/npm/@ffmpeg/util@0.12.1/+esm');
+                    FFmpegClass = ffmpegModule.FFmpeg;
+                    FFmpegUtil = utilModule;
+                } catch (e) {
+                    throw new Error('FFmpeg library not loaded. Please refresh the page and ensure scripts are loaded.');
+                }
+            }
+            
+            // Get utility functions, with fallbacks
+            const fetchFile = FFmpegUtil?.fetchFile || (async (url) => {
+                const response = await fetch(url);
+                return await response.arrayBuffer();
+            });
+            const toBlobURL = FFmpegUtil?.toBlobURL || (async (data, mimeType) => {
+                if (data instanceof ArrayBuffer) {
+                    const blob = new Blob([data], { type: mimeType });
+                    return URL.createObjectURL(blob);
+                }
+                // If it's already a URL, return it
+                return data;
+            });
+            const ffmpeg = new FFmpegClass();
+            
+            // Set up logging
+            ffmpeg.on('log', ({ message }) => {
+                console.log(message);
+            });
+            
+            progressText.textContent = 'Downloading FFmpeg (this may take a moment)...';
+            
+            // Load FFmpeg core and wasm using ESM single-threaded version
+            // This avoids worker issues entirely
+            const coreBaseURL = 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/esm';
+            
+            try {
+                // Fetch all required files
+                const [coreResponse, wasmResponse] = await Promise.all([
+                    fetch(`${coreBaseURL}/ffmpeg-core.js`),
+                    fetch(`${coreBaseURL}/ffmpeg-core.wasm`)
+                ]);
+                
+                if (!coreResponse.ok || !wasmResponse.ok) {
+                    throw new Error('Failed to download FFmpeg core files');
+                }
+                
+                // Convert to blob URLs to avoid CORS issues
+                const coreText = await coreResponse.text();
+                const wasmBuffer = await wasmResponse.arrayBuffer();
+                
+                const coreBlob = new Blob([coreText], { type: 'text/javascript' });
+                const wasmBlob = new Blob([wasmBuffer], { type: 'application/wasm' });
+                
+                const coreURL = URL.createObjectURL(coreBlob);
+                const wasmURL = URL.createObjectURL(wasmBlob);
+                
+                progressText.textContent = 'Loading FFmpeg...';
+                
+                await ffmpeg.load({
+                    coreURL: coreURL,
+                    wasmURL: wasmURL,
+                });
+                
+                console.log('FFmpeg loaded successfully');
+            } catch (loadError) {
+                console.error('FFmpeg load error:', loadError);
+                throw new Error('Failed to load FFmpeg: ' + loadError.message);
+            }
+            
+            // Pause video and reset to start
+            video.pause();
+            await seekAndWait(video, 0);
+            
+            // Ensure videoCanvas has correct dimensions
+            redrawFrame();
+            await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+            
+            const actualWidth = videoCanvas.width;
+            const actualHeight = videoCanvas.height;
+            
+            // Create export canvas
+            const exportCanvas = document.createElement('canvas');
+            exportCanvas.width = actualWidth;
+            exportCanvas.height = actualHeight;
+            const exportCtx = exportCanvas.getContext('2d', { willReadFrequently: true });
+            
+            progressText.textContent = 'Capturing frames...';
+            
+            // Capture frames as PNG with alpha
+            const frameFiles = [];
+            for (let i = 0; i < totalFrames; i++) {
+                if (!isExporting) break;
+                
+                const time = i / fps;
+                await seekAndWait(video, time);
+                redrawFrame();
+                await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+                
+                exportCtx.clearRect(0, 0, exportCanvas.width, exportCanvas.height);
+                exportCtx.drawImage(videoCanvas, 0, 0);
+                
+                // Convert to PNG with alpha
+                const pngData = exportCanvas.toDataURL('image/png');
+                const frameName = `frame_${String(i).padStart(5, '0')}.png`;
+                const binaryString = atob(pngData.split(',')[1]);
+                const bytes = new Uint8Array(binaryString.length);
+                for (let j = 0; j < binaryString.length; j++) {
+                    bytes[j] = binaryString.charCodeAt(j);
+                }
+                
+                await ffmpeg.writeFile(frameName, bytes);
+                frameFiles.push(frameName);
+                
+                const progress = Math.round(((i + 1) / totalFrames) * 50);
+                progressBarFill.style.width = progress + '%';
+                progressText.textContent = `Capturing frames... ${progress}% (${i + 1}/${totalFrames})`;
+                
+                await new Promise(resolve => setTimeout(resolve, 10));
+            }
+            
+            if (!isExporting) {
+                progressText.textContent = 'Export cancelled';
+                return;
+            }
+            
+            progressText.textContent = 'Encoding HEVC with alpha...';
+            progressBarFill.style.width = '60%';
+            
+            // Encode with HEVC and alpha channel for iOS
+            // HEVC with alpha requires specific parameters for iOS compatibility
+            const outputName = `output_${getTimestamp()}.mp4`;
+            const framePattern = 'frame_%05d.png';
+            
+            await ffmpeg.exec([
+                '-framerate', fps.toString(),
+                '-i', framePattern,
+                '-c:v', 'libx265',
+                '-pix_fmt', 'yuva420ple',
+                '-x265-params', 'lossless=1:qp=0',
+                '-tag:v', 'hvc1',
+                '-movflags', '+faststart',
+                outputName
+            ]);
+            
+            progressBarFill.style.width = '90%';
+            progressText.textContent = 'Finalizing...';
+            
+            // Read the output file
+            const data = await ffmpeg.readFile(outputName);
+            const blob = new Blob([data.buffer], { type: 'video/mp4' });
+            
+            const filename = `video_export_hevc_alpha_${getTimestamp()}.mp4`;
+            await downloadBlob(blob, filename);
+            
+            // Clean up
+            for (const file of frameFiles) {
+                try {
+                    await ffmpeg.deleteFile(file);
+                } catch (e) {
+                    // Ignore cleanup errors
+                }
+            }
+            try {
+                await ffmpeg.deleteFile(outputName);
+            } catch (e) {
+                // Ignore cleanup errors
+            }
+            
+            progressText.textContent = 'Export complete!';
+        }
+
+        // Export as animated GIF (moved to export-gif.js module)
     </script>
 </body>
 </html>
