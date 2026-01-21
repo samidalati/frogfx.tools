@@ -1199,9 +1199,11 @@
 
         // Update seek bar and time display
         function updateSeekBar() {
-            if (!isSeeking && video.duration) {
+            if (!isSeeking && video.duration && video.duration > 0 && !isNaN(video.currentTime)) {
                 const progress = (video.currentTime / video.duration) * 100;
-                seekBar.value = progress;
+                // Clamp progress to valid range
+                const clampedProgress = Math.max(0, Math.min(100, progress));
+                seekBar.value = clampedProgress;
                 currentTimeDisplay.textContent = formatTime(video.currentTime);
             }
         }
@@ -1351,25 +1353,60 @@
         });
 
         // Seek bar functionality
+        function handleSeekStart() {
+            isSeeking = true;
+        }
+
+        function handleSeekEnd() {
+            isSeeking = false;
+            // Ensure seek bar is synced with actual video position after seek completes
+            if (video.duration && video.duration > 0) {
+                const progress = (video.currentTime / video.duration) * 100;
+                seekBar.value = progress;
+                currentTimeDisplay.textContent = formatTime(video.currentTime);
+            }
+        }
+
         seekBar.addEventListener('input', (e) => {
             isSeeking = true;
             if (video.duration && video.duration > 0) {
-                const seekTime = (parseFloat(e.target.value) / 100) * video.duration;
-                video.currentTime = seekTime;
-                currentTimeDisplay.textContent = formatTime(seekTime);
+                const percentage = parseFloat(e.target.value);
+                // Clamp percentage to valid range
+                const clampedPercentage = Math.max(0, Math.min(100, percentage));
+                const seekTime = (clampedPercentage / 100) * video.duration;
+                // Clamp seek time to valid range
+                const clampedSeekTime = Math.max(0, Math.min(video.duration, seekTime));
+                video.currentTime = clampedSeekTime;
+                currentTimeDisplay.textContent = formatTime(clampedSeekTime);
             }
         });
 
         seekBar.addEventListener('change', () => {
-            isSeeking = false;
+            handleSeekEnd();
         });
 
-        seekBar.addEventListener('mousedown', () => {
-            isSeeking = true;
+        // Mouse events
+        seekBar.addEventListener('mousedown', handleSeekStart);
+        seekBar.addEventListener('mouseup', handleSeekEnd);
+        seekBar.addEventListener('mouseleave', () => {
+            // Only end seeking if mouse is released (not just moved away)
+            if (!seekBar.matches(':active')) {
+                handleSeekEnd();
+            }
         });
 
-        seekBar.addEventListener('mouseup', () => {
-            isSeeking = false;
+        // Touch events for mobile
+        seekBar.addEventListener('touchstart', handleSeekStart);
+        seekBar.addEventListener('touchend', handleSeekEnd);
+        seekBar.addEventListener('touchcancel', handleSeekEnd);
+
+        // Handle video seeked event to sync seek bar after video finishes seeking
+        video.addEventListener('seeked', () => {
+            if (!isSeeking && video.duration && video.duration > 0) {
+                const progress = (video.currentTime / video.duration) * 100;
+                seekBar.value = progress;
+                currentTimeDisplay.textContent = formatTime(video.currentTime);
+            }
         });
 
         // Color picker functionality
@@ -1443,6 +1480,11 @@
         videoInput.addEventListener('change', (e) => {
             const file = e.target.files[0];
             if (file) {
+                // Reset seek bar and time display
+                seekBar.value = 0;
+                currentTimeDisplay.textContent = '0:00';
+                isSeeking = false;
+                
                 const url = URL.createObjectURL(file);
                 video.src = url;
                 video.load();
