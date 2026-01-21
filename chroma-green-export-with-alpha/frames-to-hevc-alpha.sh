@@ -257,161 +257,85 @@ if [ -n "$BUCKET_NAME" ]; then
         exit 1
     fi
     
-    # Create HTML preview page
-    VIDEO_URL="https://${BUCKET_NAME}.s3.amazonaws.com/${S3_VIDEO_PATH}"
+    # Get bucket region for correct URL
+    BUCKET_REGION=$(aws s3api get-bucket-location --bucket "$BUCKET_NAME" --query 'LocationConstraint' --output text 2>/dev/null || echo "us-east-1")
+    # Handle us-east-1 which returns null
+    if [ "$BUCKET_REGION" = "None" ] || [ -z "$BUCKET_REGION" ]; then
+        BUCKET_REGION="us-east-1"
+    fi
+    
+    # Use region-specific URL
+    if [ "$BUCKET_REGION" = "us-east-1" ]; then
+        VIDEO_URL="https://${BUCKET_NAME}.s3.amazonaws.com/${S3_VIDEO_PATH}"
+    else
+        VIDEO_URL="https://${BUCKET_NAME}.s3.${BUCKET_REGION}.amazonaws.com/${S3_VIDEO_PATH}"
+    fi
+    
+    # Get video info for template
+    VIDEO_WIDTH=$(ffprobe -v error -select_streams v:0 -show_entries stream=width -of default=noprint_wrappers=1:nokey=1 "$OUTPUT" 2>/dev/null)
+    VIDEO_HEIGHT=$(ffprobe -v error -select_streams v:0 -show_entries stream=height -of default=noprint_wrappers=1:nokey=1 "$OUTPUT" 2>/dev/null)
+    VIDEO_FPS_RATE=$(ffprobe -v error -select_streams v:0 -show_entries stream=r_frame_rate -of default=noprint_wrappers=1:nokey=1 "$OUTPUT" 2>/dev/null)
+    
+    # Calculate FPS from rate
+    if [ -n "$VIDEO_FPS_RATE" ] && [[ "$VIDEO_FPS_RATE" =~ ^([0-9]+)/([0-9]+)$ ]]; then
+        FPS_NUM=$(echo "$VIDEO_FPS_RATE" | cut -d'/' -f1)
+        FPS_DEN=$(echo "$VIDEO_FPS_RATE" | cut -d'/' -f2)
+        if [ -n "$FPS_DEN" ] && [ "$FPS_DEN" != "0" ]; then
+            if command -v bc &> /dev/null; then
+                DISPLAY_FPS=$(echo "scale=2; $FPS_NUM / $FPS_DEN" | bc | sed 's/\.00$//')
+            else
+                DISPLAY_FPS="$FPS"
+            fi
+        else
+            DISPLAY_FPS="$FPS"
+        fi
+    else
+        DISPLAY_FPS="$FPS"
+    fi
+    
+    # Format duration
+    DURATION_SEC=$(ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "$OUTPUT" 2>/dev/null)
+    if [ -n "$DURATION_SEC" ]; then
+        DURATION_FORMATTED=$(printf "%.2f" "$DURATION_SEC" | sed 's/\.00$//')
+        DURATION_DISPLAY="${DURATION_FORMATTED}s"
+    else
+        DURATION_DISPLAY="N/A"
+    fi
+    
+    # Format encoding info
+    if [ "$FORMAT" == "hevc" ]; then
+        ENCODING_DISPLAY="HEVC (VideoToolbox)"
+    else
+        ENCODING_DISPLAY="ProRes 4444"
+    fi
+    
+    # Format file type
+    if [ "$FORMAT" == "hevc" ]; then
+        FILE_TYPE_DISPLAY="HEVC/MOV"
+    else
+        FILE_TYPE_DISPLAY="ProRes/MOV"
+    fi
+    
+    # Read template and replace placeholders
+    TEMPLATE_PATH="$(dirname "$0")/preview-template.html"
+    if [ ! -f "$TEMPLATE_PATH" ]; then
+        echo -e "${RED}Error: Template file not found: $TEMPLATE_PATH${NC}"
+        exit 1
+    fi
     
     # Create temporary HTML file
     HTML_TEMP=$(mktemp)
-    cat > "$HTML_TEMP" <<HTML_EOF
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>HEVC Alpha Preview</title>
-    <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-        
-        html, body {
-            height: 100%;
-            width: 100%;
-            overflow: hidden;
-        }
-        
-        body {
-            background: linear-gradient(45deg, #ff00ff 25%, #00ffff 25%, #00ffff 50%, #ff00ff 50%, #ff00ff 75%, #00ffff 75%);
-            background-size: 40px 40px;
-            height: 100vh;
-            width: 100vw;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            padding: 10px;
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
-        }
-        
-        .header {
-            flex-shrink: 0;
-            text-align: center;
-            margin-bottom: 10px;
-        }
-        
-        h1 {
-            color: white;
-            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.5);
-            font-size: clamp(16px, 3vw, 24px);
-            margin-bottom: 5px;
-        }
-        
-        .info {
-            color: white;
-            text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.5);
-            font-size: clamp(12px, 2vw, 14px);
-            max-width: 90vw;
-        }
-        
-        .video-container {
-            flex: 1;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            background: rgba(255, 255, 255, 0.1);
-            border-radius: 12px;
-            padding: 10px;
-            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
-            max-width: calc(100vw - 20px);
-            max-height: calc(100vh - 200px);
-            min-height: 0;
-        }
-        
-        video {
-            max-width: 100%;
-            max-height: 100%;
-            width: auto;
-            height: auto;
-            display: block;
-            border-radius: 8px;
-            background: transparent;
-            object-fit: contain;
-        }
-        
-        .url-info {
-            flex-shrink: 0;
-            margin-top: 10px;
-            padding: 10px;
-            background: rgba(0, 0, 0, 0.3);
-            border-radius: 8px;
-            color: white;
-            font-size: clamp(10px, 1.5vw, 12px);
-            max-width: calc(100vw - 20px);
-            word-break: break-all;
-            overflow: hidden;
-        }
-        
-        .url-info strong {
-            display: block;
-            margin-bottom: 5px;
-            color: #ffeb3b;
-        }
-        
-        .url-info a {
-            color: #4fc3f7;
-            text-decoration: none;
-        }
-        
-        .url-info a:hover {
-            text-decoration: underline;
-        }
-        
-        @media (max-height: 600px) {
-            .header {
-                margin-bottom: 5px;
-            }
-            
-            h1 {
-                font-size: 14px;
-                margin-bottom: 2px;
-            }
-            
-            .info {
-                font-size: 11px;
-            }
-            
-            .video-container {
-                max-height: calc(100vh - 120px);
-                padding: 5px;
-            }
-            
-            .url-info {
-                margin-top: 5px;
-                padding: 5px;
-                font-size: 10px;
-            }
-        }
-    </style>
-</head>
-<body>
-    <div class="header">
-        <h1>HEVC Alpha Transparency Test</h1>
-        <p class="info">If the video has alpha, you should see the checkered background through transparent areas</p>
-    </div>
-    
-    <div class="video-container">
-        <video src="${VIDEO_URL}" autoplay loop muted playsinline controls></video>
-    </div>
-    
-    <div class="url-info">
-        <strong>Video URL:</strong>
-        <a href="${VIDEO_URL}" target="_blank">${VIDEO_URL}</a>
-    </div>
-</body>
-</html>
-HTML_EOF
+    sed -e "s|{{TITLE}}|${FORMAT^} Alpha Preview|g" \
+        -e "s|{{DESCRIPTION}}|If the video has alpha, you should see the checkered background through transparent areas|g" \
+        -e "s|{{MEDIA_ELEMENT}}|<video src=\"${VIDEO_URL}\" autoplay loop muted playsinline controls></video>|g" \
+        -e "s|{{FILE_TYPE}}|${FILE_TYPE_DISPLAY}|g" \
+        -e "s|{{RESOLUTION}}|${VIDEO_WIDTH}x${VIDEO_HEIGHT}|g" \
+        -e "s|{{FPS}}|${DISPLAY_FPS}|g" \
+        -e "s|{{ENCODING}}|${ENCODING_DISPLAY}|g" \
+        -e "s|{{DURATION}}|${DURATION_DISPLAY}|g" \
+        -e "s|{{MEDIA_URL}}|${VIDEO_URL}|g" \
+        -e "s|{{SCRIPT_CONTENT}}||g" \
+        "$TEMPLATE_PATH" > "$HTML_TEMP"
     
     # Upload HTML with public read grant
     echo -e "${YELLOW}Uploading HTML preview to s3://${BUCKET_NAME}/${S3_HTML_PATH}...${NC}"

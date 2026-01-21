@@ -224,9 +224,6 @@ if [ -n "$BUCKET_NAME" ]; then
         exit 1
     fi
     
-    # Create HTML preview page
-    WEBP_URL="https://${BUCKET_NAME}.s3.amazonaws.com/${S3_WEBP_PATH}"
-    
     # Get bucket region for correct URL
     BUCKET_REGION=$(aws s3api get-bucket-location --bucket "$BUCKET_NAME" --query 'LocationConstraint' --output text 2>/dev/null || echo "us-east-1")
     # Handle us-east-1 which returns null
@@ -241,173 +238,37 @@ if [ -n "$BUCKET_NAME" ]; then
         WEBP_URL="https://${BUCKET_NAME}.s3.${BUCKET_REGION}.amazonaws.com/${S3_WEBP_PATH}"
     fi
     
-    # Create temporary HTML file
-    HTML_TEMP=$(mktemp)
-    cat > "$HTML_TEMP" <<HTML_EOF
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Animated WebP Preview</title>
-    <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-        
-        html, body {
-            height: 100%;
-            width: 100%;
-            overflow: hidden;
-        }
-        
-        body {
-            background: linear-gradient(45deg, #ff00ff 25%, #00ffff 25%, #00ffff 50%, #ff00ff 50%, #ff00ff 75%, #00ffff 75%);
-            background-size: 40px 40px;
-            height: 100vh;
-            width: 100vw;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            padding: 10px;
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
-        }
-        
-        .header {
-            flex-shrink: 0;
-            text-align: center;
-            margin-bottom: 10px;
-        }
-        
-        h1 {
-            color: white;
-            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.5);
-            font-size: clamp(16px, 3vw, 24px);
-            margin-bottom: 5px;
-        }
-        
-        .info {
-            color: white;
-            text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.5);
-            font-size: clamp(12px, 2vw, 14px);
-            max-width: 90vw;
-        }
-        
-        .image-container {
-            flex: 1;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            background: rgba(255, 255, 255, 0.1);
-            border-radius: 12px;
-            padding: 10px;
-            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
-            max-width: calc(100vw - 20px);
-            max-height: calc(100vh - 200px);
-            min-height: 0;
-        }
-        
-        img, video, canvas {
-            max-width: 100%;
-            max-height: 100%;
-            width: auto;
-            height: auto;
-            display: block;
-            border-radius: 8px;
-            background: transparent;
-            object-fit: contain;
-        }
-        
-        canvas {
-            border: 2px solid rgba(255, 255, 255, 0.3);
-        }
-        
-        .fallback-img {
-            display: none;
-        }
-        
-        #webpCanvas {
-            display: none;
-        }
-        
-        #webpCanvas.active {
-            display: block;
-        }
-        
-        .url-info {
-            flex-shrink: 0;
-            margin-top: 10px;
-            padding: 10px;
-            background: rgba(0, 0, 0, 0.3);
-            border-radius: 8px;
-            color: white;
-            font-size: clamp(10px, 1.5vw, 12px);
-            max-width: calc(100vw - 20px);
-            word-break: break-all;
-            overflow: hidden;
-        }
-        
-        .url-info strong {
-            display: block;
-            margin-bottom: 5px;
-            color: #ffeb3b;
-        }
-        
-        .url-info a {
-            color: #4fc3f7;
-            text-decoration: none;
-        }
-        
-        .url-info a:hover {
-            text-decoration: underline;
-        }
-        
-        @media (max-height: 600px) {
-            .header {
-                margin-bottom: 5px;
-            }
-            
-            h1 {
-                font-size: 14px;
-                margin-bottom: 2px;
-            }
-            
-            .info {
-                font-size: 11px;
-            }
-            
-            .image-container {
-                max-height: calc(100vh - 120px);
-                padding: 5px;
-            }
-            
-            .url-info {
-                margin-top: 5px;
-                padding: 5px;
-                font-size: 10px;
-            }
-        }
-    </style>
-</head>
-<body>
-    <div class="header">
-        <h1>Animated WebP Preview</h1>
-        <p class="info">If the image has transparency, you should see the checkered background through transparent areas</p>
-    </div>
+    # Get WebP info for template (try to get dimensions from first frame)
+    WEBP_WIDTH=$(ffprobe -v error -select_streams v:0 -show_entries stream=width -of default=noprint_wrappers=1:nokey=1 "$OUTPUT" 2>/dev/null || echo "N/A")
+    WEBP_HEIGHT=$(ffprobe -v error -select_streams v:0 -show_entries stream=height -of default=noprint_wrappers=1:nokey=1 "$OUTPUT" 2>/dev/null || echo "N/A")
     
-    <div class="image-container">
-        <canvas id="webpCanvas"></canvas>
-        <img id="webpFallback" class="fallback-img" src="${WEBP_URL}" alt="Animated WebP">
-    </div>
+    # Format resolution
+    if [ "$WEBP_WIDTH" != "N/A" ] && [ "$WEBP_HEIGHT" != "N/A" ]; then
+        RESOLUTION_DISPLAY="${WEBP_WIDTH}x${WEBP_HEIGHT}"
+    else
+        RESOLUTION_DISPLAY="N/A"
+    fi
+    
+    # Calculate duration from frame count and FPS
+    if [ -n "$FRAME_COUNT" ] && [ "$FRAME_COUNT" -gt 0 ] && [ -n "$FPS" ]; then
+        if command -v bc &> /dev/null; then
+            DURATION_SEC=$(echo "scale=2; $FRAME_COUNT / $FPS" | bc)
+            DURATION_DISPLAY="${DURATION_SEC}s"
+        else
+            DURATION_DISPLAY="${FRAME_COUNT} frames @ ${FPS}fps"
+        fi
+    else
+        DURATION_DISPLAY="N/A"
+    fi
+    
+    # Create ImageDecoder script for WebP
+    SCRIPT_CONTENT=$(cat <<'SCRIPT_EOF'
     <script>
         (async function() {
             const canvas = document.getElementById('webpCanvas');
             const ctx = canvas.getContext('2d');
             const img = document.getElementById('webpFallback');
-            const webpUrl = '${WEBP_URL}';
+            const webpUrl = '{{WEBP_URL}}';
             
             // Check if ImageDecoder API is available (Chrome 94+, Edge 94+)
             if ('ImageDecoder' in window) {
@@ -550,20 +411,54 @@ if [ -n "$BUCKET_NAME" ]; then
                 // Show a message to the user
                 const warning = document.createElement('div');
                 warning.style.cssText = 'position: fixed; top: 10px; left: 50%; transform: translateX(-50%); background: rgba(255, 193, 7, 0.9); color: #000; padding: 10px 20px; border-radius: 8px; font-size: 12px; z-index: 1000; max-width: 90%; text-align: center;';
-                warning.textContent = '⚠️ Your browser doesn\'t support ImageDecoder API. Animation will loop. Use Chrome 94+ or Edge 94+ for play-once functionality.';
+                warning.textContent = "⚠️ Your browser doesn't support ImageDecoder API. Animation will loop. Use Chrome 94+ or Edge 94+ for play-once functionality.";
                 document.body.appendChild(warning);
                 setTimeout(() => warning.remove(), 5000);
             }
         })();
     </script>
+SCRIPT_EOF
+)
     
-    <div class="url-info">
-        <strong>Image URL:</strong>
-        <a href="${WEBP_URL}" target="_blank">${WEBP_URL}</a>
-    </div>
-</body>
-</html>
-HTML_EOF
+    # Read template and replace placeholders
+    TEMPLATE_PATH="$(dirname "$0")/preview-template.html"
+    if [ ! -f "$TEMPLATE_PATH" ]; then
+        echo -e "${RED}Error: Template file not found: $TEMPLATE_PATH${NC}"
+        exit 1
+    fi
+    
+    # Replace WEBP_URL placeholder in script content and write to temp file
+    SCRIPT_TEMP=$(mktemp)
+    echo "$SCRIPT_CONTENT" | sed "s|{{WEBP_URL}}|${WEBP_URL}|g" > "$SCRIPT_TEMP"
+    
+    # Create temporary HTML file
+    HTML_TEMP=$(mktemp)
+    # First replace all placeholders except SCRIPT_CONTENT
+    sed -e "s|{{TITLE}}|Animated WebP Preview|g" \
+        -e "s|{{DESCRIPTION}}|If the image has transparency, you should see the checkered background through transparent areas|g" \
+        -e "s|{{MEDIA_ELEMENT}}|<canvas id=\"webpCanvas\"></canvas><img id=\"webpFallback\" class=\"fallback-img\" src=\"${WEBP_URL}\" alt=\"Animated WebP\">|g" \
+        -e "s|{{FILE_TYPE}}|Animated WebP|g" \
+        -e "s|{{RESOLUTION}}|${RESOLUTION_DISPLAY}|g" \
+        -e "s|{{FPS}}|${FPS}|g" \
+        -e "s|{{ENCODING}}|WebP Animation|g" \
+        -e "s|{{DURATION}}|${DURATION_DISPLAY}|g" \
+        -e "s|{{MEDIA_URL}}|${WEBP_URL}|g" \
+        "$TEMPLATE_PATH" > "$HTML_TEMP"
+    
+    # Now replace SCRIPT_CONTENT placeholder with actual script content
+    awk -v script_file="$SCRIPT_TEMP" '
+        /{{SCRIPT_CONTENT}}/ {
+            while ((getline line < script_file) > 0) {
+                print line
+            }
+            close(script_file)
+            next
+        }
+        { print }
+    ' "$HTML_TEMP" > "${HTML_TEMP}.new" && mv "${HTML_TEMP}.new" "$HTML_TEMP"
+    
+    # Clean up script temp file
+    rm -f "$SCRIPT_TEMP"
     
     # Upload HTML with public read grant
     echo -e "${YELLOW}Uploading HTML preview to s3://${BUCKET_NAME}/${S3_HTML_PATH}...${NC}"
