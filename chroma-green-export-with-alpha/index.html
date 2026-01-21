@@ -762,6 +762,11 @@
                                 <i class="fas fa-palette"></i>
                                 <span>Custom Color Selection</span>
                             </label>
+                            <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; margin-top: 4px;">
+                                <input type="checkbox" id="enableRegion" style="width: 18px; height: 18px; cursor: pointer;">
+                                <i class="fas fa-magic"></i>
+                                <span>Region Selection</span>
+                            </label>
                         </div>
                     </div>
                     
@@ -820,6 +825,27 @@
                             <label>Smoothness: <span class="value" id="smoothnessValueMagenta">0.2</span></label>
                             <input type="range" id="smoothnessMagenta" min="0" max="5" step="0.1" value="0.2">
                             <small>Edge smoothing for better blending (higher = more aggressive filtering)</small>
+                        </div>
+                    </div>
+
+                    <!-- Settings for region selection -->
+                    <div id="regionSettings" class="settings-scenario" style="display: none;">
+                        <h4><i class="fas fa-magic"></i> Region Selection</h4>
+                        <div class="setting-group" style="margin-bottom: 12px;">
+                            <button id="regionPickerBtn" style="width: 100%; margin-bottom: 0;"><i class="fas fa-mouse-pointer"></i> Pick Region</button>
+                        </div>
+                        <div id="regionInfo" style="display: none; margin-bottom: 12px; padding: 8px; background: #f0f0f0; border-radius: 4px; font-size: 12px;">
+                            <div>Region Selected: <span id="regionInfoText">-</span></div>
+                        </div>
+                        <div class="setting-group">
+                            <label>Color Tolerance: <span class="value" id="regionToleranceValue">0.3</span></label>
+                            <input type="range" id="regionTolerance" min="0.1" max="1" step="0.05" value="0.3">
+                            <small>How similar colors must be to be included in the region (higher = larger region)</small>
+                        </div>
+                        <div class="setting-group">
+                            <label>Edge Softness: <span class="value" id="regionSmoothnessValue">1.0</span></label>
+                            <input type="range" id="regionSmoothness" min="0.1" max="5" step="0.1" value="1.0">
+                            <small>Softness of region edges (lower = sharper, higher = softer)</small>
                         </div>
                     </div>
 
@@ -911,10 +937,21 @@
         const colorPickerSettings = document.getElementById('colorPickerSettings');
         const defaultSettings = document.getElementById('defaultSettings');
         const magentaSettings = document.getElementById('magentaSettings');
+        const regionSettings = document.getElementById('regionSettings');
         const enableGreen = document.getElementById('enableGreen');
         const enableMagenta = document.getElementById('enableMagenta');
         const enableCustom = document.getElementById('enableCustom');
+        const enableRegion = document.getElementById('enableRegion');
         const resetFilterBtn = document.getElementById('resetFilterBtn');
+        
+        // Region picker elements
+        const regionPickerBtn = document.getElementById('regionPickerBtn');
+        const regionInfo = document.getElementById('regionInfo');
+        const regionInfoText = document.getElementById('regionInfoText');
+        const regionToleranceSlider = document.getElementById('regionTolerance');
+        const regionSmoothnessSlider = document.getElementById('regionSmoothness');
+        const regionToleranceValue = document.getElementById('regionToleranceValue');
+        const regionSmoothnessValue = document.getElementById('regionSmoothnessValue');
         
         // Magenta settings elements
         const thresholdSliderMagenta = document.getElementById('thresholdMagenta');
@@ -928,6 +965,13 @@
         let enableGreenFilter = true;  // Green enabled by default
         let enableMagentaFilter = false;
         let enableCustomFilter = false;
+        let enableRegionFilter = false;
+        
+        // Region selection state
+        let isRegionPickerMode = false;
+        let selectedRegion = null; // Uint8Array mask: 1 = selected, 0 = not selected
+        let regionSeedColor = null; // { r, g, b } - the color at the clicked point
+        let lastRegionFrameTime = -1; // Cache: track last frame time we calculated region for
 
         let video = document.createElement('video');
         video.muted = true; // Default to muted
@@ -938,7 +982,7 @@
         let isRepeating = false;
         let isSeeking = false;
 
-        // Settings (separate values for green, magenta, and custom)
+        // Settings (separate values for green, magenta, custom, and region)
         let settings = {
             green: {
                 threshold: 0.3,
@@ -953,6 +997,10 @@
             custom: {
                 threshold: 0.5,
                 smoothness: 1.5
+            },
+            region: {
+                tolerance: 0.3,
+                smoothness: 1.0
             }
         };
 
@@ -984,6 +1032,15 @@
                 colorPickerSettings.style.display = 'none';
                 colorPickerSettings.classList.remove('active');
             }
+            
+            // Show/hide region settings
+            if (enableRegionFilter) {
+                regionSettings.style.display = 'block';
+                regionSettings.classList.add('active');
+            } else {
+                regionSettings.style.display = 'none';
+                regionSettings.classList.remove('active');
+            }
         }
 
         // Function to reset filter to default values
@@ -1011,15 +1068,25 @@
             saturationValueMagenta.textContent = '0.40';
             smoothnessValueMagenta.textContent = '0.20';
             
+            // Region selection mode defaults
+            regionToleranceSlider.value = 0.3;
+            regionSmoothnessSlider.value = 1.0;
+            regionToleranceValue.textContent = '0.30';
+            regionSmoothnessValue.textContent = '1.00';
+            
             // Reset all settings to defaults
             settings.green = { threshold: 0.3, saturation: 0.4, smoothness: 0.2 };
             settings.magenta = { threshold: 0.3, saturation: 0.4, smoothness: 0.2 };
             settings.custom = { threshold: 0.5, smoothness: 1.5 };
+            settings.region = { tolerance: 0.3, smoothness: 1.0 };
             
-            // Clear selected color
+            // Clear selected color and region
             targetColor = null;
             targetHSV = null;
             selectedColorDisplay.style.display = 'none';
+            selectedRegion = null;
+            regionSeedColor = null;
+            regionInfo.style.display = 'none';
         }
 
         // Handle checkbox changes
@@ -1041,6 +1108,21 @@
                 targetColor = null;
                 targetHSV = null;
                 selectedColorDisplay.style.display = 'none';
+            }
+            updateSettingsVisibility();
+            redrawFrame();
+        });
+
+        enableRegion.addEventListener('change', (e) => {
+            enableRegionFilter = e.target.checked;
+            if (!enableRegionFilter) {
+                selectedRegion = null;
+                regionSeedColor = null;
+                regionInfo.style.display = 'none';
+                isRegionPickerMode = false;
+                regionPickerBtn.classList.remove('active');
+                regionPickerBtn.innerHTML = '<i class="fas fa-mouse-pointer"></i> Pick Region';
+                videoCanvas.classList.remove('picker-mode');
             }
             updateSettingsVisibility();
             redrawFrame();
@@ -1095,6 +1177,37 @@
             settings.magenta.smoothness = parseFloat(e.target.value);
             smoothnessValueMagenta.textContent = settings.magenta.smoothness.toFixed(2);
             redrawFrame();
+        });
+
+        // Region settings event listeners
+        // Debounce timer for tolerance slider to avoid expensive recalculations
+        let toleranceDebounceTimer = null;
+        regionToleranceSlider.addEventListener('input', (e) => {
+            settings.region.tolerance = parseFloat(e.target.value);
+            regionToleranceValue.textContent = settings.region.tolerance.toFixed(2);
+            
+            // Reset cache so region recalculates with new tolerance
+            lastRegionFrameTime = -1;
+            
+            // Debounce the expensive recalculation - only recalculate after user stops dragging
+            clearTimeout(toleranceDebounceTimer);
+            toleranceDebounceTimer = setTimeout(() => {
+                // Just redraw - the region will be recalculated in redrawFrame() for the current frame
+                redrawFrame();
+            }, 150); // Wait 150ms after last input event
+        });
+
+        // Debounce timer for smoothness slider
+        let smoothnessDebounceTimer = null;
+        regionSmoothnessSlider.addEventListener('input', (e) => {
+            settings.region.smoothness = parseFloat(e.target.value);
+            regionSmoothnessValue.textContent = settings.region.smoothness.toFixed(2);
+            
+            // Debounce to avoid excessive redraws while dragging
+            clearTimeout(smoothnessDebounceTimer);
+            smoothnessDebounceTimer = setTimeout(() => {
+                redrawFrame();
+            }, 50); // Shorter delay since smoothness doesn't require expensive recalculation
         });
 
         // Convert RGB to HSV
@@ -1176,11 +1289,101 @@
             return isMagentaHue && isSaturated && magentaDominance;
         }
 
+        // Calculate color distance (0 = identical, 1 = completely different)
+        function colorDistance(r1, g1, b1, r2, g2, b2) {
+            const dr = r1 - r2;
+            const dg = g1 - g2;
+            const db = b1 - b2;
+            // Normalized Euclidean distance in RGB space
+            return Math.sqrt(dr * dr + dg * dg + db * db) / (255 * Math.sqrt(3));
+        }
+
+        // Flood fill algorithm to select connected region of similar colors
+        // Calculate region mask for the current frame based on seed color
+        // This is called dynamically for each frame to track moving/changing regions
+        function calculateRegionForCurrentFrame(imageData) {
+            if (!regionSeedColor || !enableRegionFilter) {
+                return null;
+            }
+            
+            const data = imageData.data;
+            const width = imageData.width;
+            const height = imageData.height;
+            const tolerance = settings.region.tolerance;
+            
+            // Create mask array (1 = selected, 0 = not selected)
+            const mask = new Uint8Array(width * height);
+            
+            // Find all pixels that match the seed color (within tolerance)
+            // This creates a color-based mask for the current frame
+            for (let y = 0; y < height; y++) {
+                for (let x = 0; x < width; x++) {
+                    const idx = (y * width + x) * 4;
+                    const r = data[idx];
+                    const g = data[idx + 1];
+                    const b = data[idx + 2];
+                    
+                    const dist = colorDistance(r, g, b, regionSeedColor.r, regionSeedColor.g, regionSeedColor.b);
+                    if (dist <= tolerance) {
+                        mask[y * width + x] = 1;
+                    }
+                }
+            }
+            
+            return mask;
+        }
+
+        function calculateRegionFromSeed(seedX, seedY) {
+            if (video.readyState < 2) return;
+            
+            // Draw current frame to canvas
+            ctx.drawImage(video, 0, 0);
+            const imageData = ctx.getImageData(0, 0, videoCanvas.width, videoCanvas.height);
+            const data = imageData.data;
+            const width = imageData.width;
+            const height = imageData.height;
+            
+            // Validate seed coordinates
+            if (seedX < 0 || seedX >= width || seedY < 0 || seedY >= height) {
+                console.warn('Invalid seed coordinates');
+                return;
+            }
+            
+            // Get seed color from clicked pixel
+            const seedIdx = (seedY * width + seedX) * 4;
+            const seedR = data[seedIdx];
+            const seedG = data[seedIdx + 1];
+            const seedB = data[seedIdx + 2];
+            
+            // Store seed color for later use (this will be used for all frames)
+            regionSeedColor = { r: seedR, g: seedG, b: seedB };
+            
+            // Reset cache so region recalculates for new selection
+            lastRegionFrameTime = -1;
+            
+            // Calculate initial region for display purposes
+            const mask = calculateRegionForCurrentFrame(imageData);
+            selectedRegion = mask; // Store for initial display, but will be recalculated per frame
+            
+            // Update info display
+            if (mask) {
+                const pixelCount = mask.reduce((sum, val) => sum + val, 0);
+                const percentage = ((pixelCount / mask.length) * 100).toFixed(1);
+                regionInfoText.textContent = `${pixelCount.toLocaleString()} pixels (${percentage}%)`;
+                regionInfo.style.display = 'block';
+            }
+        }
+
         // Apply chroma key effect - supports multiple filters simultaneously
         function applyChromaKey(imageData) {
             const data = imageData.data;
+            const width = imageData.width;
+            const height = imageData.height;
             
             for (let i = 0; i < data.length; i += 4) {
+                const pixelIndex = i / 4;
+                const x = pixelIndex % width;
+                const y = Math.floor(pixelIndex / width);
                 const r = data[i];
                 const g = data[i + 1];
                 const b = data[i + 2];
@@ -1188,6 +1391,7 @@
                 let matchedGreen = false;
                 let matchedMagenta = false;
                 let matchedCustom = false;
+                let matchedRegion = false;
                 
                 // Check green filter
                 if (enableGreenFilter && isGreenPixel(r, g, b, settings.green.threshold, settings.green.saturation)) {
@@ -1219,6 +1423,32 @@
                         const effectiveSmoothness = Math.max(0.1, settings.custom.smoothness);
                         const alpha = Math.pow(distanceFromTarget, 1 / effectiveSmoothness);
                         finalAlpha = Math.min(finalAlpha, Math.round(alpha * 255));
+                    }
+                }
+                
+                // Check region filter
+                if (enableRegionFilter && selectedRegion) {
+                    const maskIndex = y * width + x;
+                    if (selectedRegion[maskIndex] === 1) {
+                        matchedRegion = true;
+                        // Check if pixel is on the edge of the region (for softness)
+                        let isEdgePixel = false;
+                        if (x > 0 && selectedRegion[y * width + (x - 1)] === 0) isEdgePixel = true;
+                        else if (x < width - 1 && selectedRegion[y * width + (x + 1)] === 0) isEdgePixel = true;
+                        else if (y > 0 && selectedRegion[(y - 1) * width + x] === 0) isEdgePixel = true;
+                        else if (y < height - 1 && selectedRegion[(y + 1) * width + x] === 0) isEdgePixel = true;
+                        
+                        if (isEdgePixel && settings.region.smoothness > 0.1) {
+                            // Edge pixel - apply softness
+                            const effectiveSmoothness = Math.max(0.1, settings.region.smoothness);
+                            // Calculate distance to nearest non-selected neighbor for edge falloff
+                            // For simplicity, use a fixed edge alpha based on smoothness
+                            const edgeAlpha = Math.pow(0.5, 1 / effectiveSmoothness);
+                            finalAlpha = Math.min(finalAlpha, Math.round(edgeAlpha * 255));
+                        } else {
+                            // Interior pixel - fully transparent
+                            finalAlpha = 0;
+                        }
                     }
                 }
                 
@@ -1275,16 +1505,39 @@
                 videoCanvas.width = video.videoWidth;
                 videoCanvas.height = video.videoHeight;
 
+                // Clear canvas completely first to ensure no residual pixels
+                ctx.clearRect(0, 0, videoCanvas.width, videoCanvas.height);
+                
+                // Set composite operation to ensure transparency works correctly
+                ctx.globalCompositeOperation = 'source-over';
+
                 // Draw current video frame
                 ctx.drawImage(video, 0, 0);
 
                 // Get image data
                 const imageData = ctx.getImageData(0, 0, videoCanvas.width, videoCanvas.height);
                 
+                // Recalculate region for current frame if region filter is enabled
+                // Only recalculate when video time actually changes (not on every redraw)
+                // This ensures the region tracks the object as it moves/changes shape without performance issues
+                const currentTime = video.currentTime;
+                if (enableRegionFilter && regionSeedColor) {
+                    // Only recalculate if this is a new frame (time changed)
+                    if (Math.abs(currentTime - lastRegionFrameTime) > 0.01) { // 10ms threshold to account for floating point precision
+                        selectedRegion = calculateRegionForCurrentFrame(imageData);
+                        lastRegionFrameTime = currentTime;
+                    }
+                } else {
+                    lastRegionFrameTime = -1; // Reset cache when region filter is disabled
+                }
+                
                 // Apply chroma key
                 const processedData = applyChromaKey(imageData);
                 
-                // Put processed data back
+                // Clear canvas again before putting processed data
+                ctx.clearRect(0, 0, videoCanvas.width, videoCanvas.height);
+                
+                // Put processed data back (transparent pixels will show checkerboard background)
                 ctx.putImageData(processedData, 0, 0);
             }
         }
@@ -1314,12 +1567,16 @@
 
         // Update seek bar and time display
         function updateSeekBar() {
-            if (!isSeeking && video.duration && video.duration > 0 && !isNaN(video.currentTime)) {
-                const progress = (video.currentTime / video.duration) * 100;
-                // Clamp progress to valid range
-                const clampedProgress = Math.max(0, Math.min(100, progress));
-                seekBar.value = clampedProgress;
-                currentTimeDisplay.textContent = formatTime(video.currentTime);
+            // Allow updates even when video has ended (so seek bar remains functional)
+            if (video.duration && video.duration > 0 && !isNaN(video.currentTime)) {
+                // Update when not seeking, or when video has ended (to keep seek bar functional)
+                if (!isSeeking || video.ended) {
+                    const progress = (video.currentTime / video.duration) * 100;
+                    // Clamp progress to valid range
+                    const clampedProgress = Math.max(0, Math.min(100, progress));
+                    seekBar.value = clampedProgress;
+                    currentTimeDisplay.textContent = formatTime(video.currentTime);
+                }
             }
         }
 
@@ -1422,6 +1679,13 @@
                 if (animationFrameId) {
                     cancelAnimationFrame(animationFrameId);
                 }
+                // Update seek bar to show video has ended (at 100%)
+                if (video.duration && video.duration > 0) {
+                    seekBar.value = 100;
+                    currentTimeDisplay.textContent = formatTime(video.duration);
+                }
+                // Redraw the last frame
+                redrawFrame();
             }
         });
 
@@ -1479,6 +1743,8 @@
                 const progress = (video.currentTime / video.duration) * 100;
                 seekBar.value = progress;
                 currentTimeDisplay.textContent = formatTime(video.currentTime);
+                // Redraw frame after seek ends
+                redrawFrame();
             }
         }
 
@@ -1491,8 +1757,15 @@
                 const seekTime = (clampedPercentage / 100) * video.duration;
                 // Clamp seek time to valid range
                 const clampedSeekTime = Math.max(0, Math.min(video.duration, seekTime));
+                // If video has ended, we need to seek to allow seeking again
+                if (video.ended) {
+                    // Pause first to reset ended state, then seek
+                    video.pause();
+                }
                 video.currentTime = clampedSeekTime;
                 currentTimeDisplay.textContent = formatTime(clampedSeekTime);
+                // Redraw frame immediately when seeking
+                redrawFrame();
             }
         });
 
@@ -1517,10 +1790,12 @@
 
         // Handle video seeked event to sync seek bar after video finishes seeking
         video.addEventListener('seeked', () => {
-            if (!isSeeking && video.duration && video.duration > 0) {
+            if (video.duration && video.duration > 0) {
                 const progress = (video.currentTime / video.duration) * 100;
                 seekBar.value = progress;
                 currentTimeDisplay.textContent = formatTime(video.currentTime);
+                // Redraw frame after seeking
+                redrawFrame();
             }
         });
 
@@ -1532,6 +1807,12 @@
                 colorPickerBtn.classList.add('active');
                 colorPickerBtn.innerHTML = '<i class="fas fa-crosshairs"></i> Click Video';
                 videoCanvas.classList.add('picker-mode');
+                // Disable region picker if active
+                if (isRegionPickerMode) {
+                    isRegionPickerMode = false;
+                    regionPickerBtn.classList.remove('active');
+                    regionPickerBtn.innerHTML = '<i class="fas fa-mouse-pointer"></i> Pick Region';
+                }
             } else {
                 colorPickerBtn.classList.remove('active');
                 colorPickerBtn.innerHTML = '<i class="fas fa-eyedropper"></i> Pick Color';
@@ -1539,8 +1820,62 @@
             }
         });
 
-        // Handle canvas click for color picking
+        // Region picker functionality
+        regionPickerBtn.addEventListener('click', () => {
+            if (!enableRegionFilter) {
+                enableRegionFilter = true;
+                enableRegion.checked = true;
+                updateSettingsVisibility();
+            }
+            
+            isRegionPickerMode = !isRegionPickerMode;
+            
+            if (isRegionPickerMode) {
+                regionPickerBtn.classList.add('active');
+                regionPickerBtn.innerHTML = '<i class="fas fa-crosshairs"></i> Click Region';
+                videoCanvas.classList.add('picker-mode');
+                // Disable color picker if active
+                if (isPickerMode) {
+                    isPickerMode = false;
+                    colorPickerBtn.classList.remove('active');
+                    colorPickerBtn.innerHTML = '<i class="fas fa-eyedropper"></i> Pick Color';
+                }
+            } else {
+                regionPickerBtn.classList.remove('active');
+                regionPickerBtn.innerHTML = '<i class="fas fa-mouse-pointer"></i> Pick Region';
+                videoCanvas.classList.remove('picker-mode');
+            }
+        });
+
+        // Handle canvas click for color picking and region picking
         videoCanvas.addEventListener('click', (e) => {
+            if (isRegionPickerMode) {
+                // Handle region picking
+                const rect = videoCanvas.getBoundingClientRect();
+                const scaleX = videoCanvas.width / rect.width;
+                const scaleY = videoCanvas.height / rect.height;
+                
+                const x = Math.floor((e.clientX - rect.left) * scaleX);
+                const y = Math.floor((e.clientY - rect.top) * scaleY);
+
+                if (video.readyState >= 2) {
+                    // Calculate region from clicked point
+                    calculateRegionFromSeed(x, y);
+                    
+                    // Exit picker mode
+                    isRegionPickerMode = false;
+                    regionPickerBtn.classList.remove('active');
+                    regionPickerBtn.innerHTML = '<i class="fas fa-mouse-pointer"></i> Pick Region';
+                    videoCanvas.classList.remove('picker-mode');
+                    
+                    // Redraw frame with region filter
+                    if (isPlaying || video.readyState >= 2) {
+                        drawFrame();
+                    }
+                }
+                return;
+            }
+            
             if (!isPickerMode) return;
 
             const rect = videoCanvas.getBoundingClientRect();
