@@ -745,11 +745,24 @@
                     <h3>Chroma Key Settings</h3>
                     
                     <div class="approach-selector">
-                        <label for="approachSelect">Detection Approach:</label>
-                        <select id="approachSelect">
-                            <option value="default">Default Green Screen Detection</option>
-                            <option value="custom">Custom Color Selection</option>
-                        </select>
+                        <label style="margin-bottom: 8px; display: block;">Enable Filters:</label>
+                        <div style="display: flex; flex-direction: column; gap: 8px;">
+                            <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                                <input type="checkbox" id="enableGreen" checked style="width: 18px; height: 18px; cursor: pointer;">
+                                <i class="fas fa-circle" style="color: #28a745;"></i>
+                                <span>Green Screen Detection</span>
+                            </label>
+                            <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                                <input type="checkbox" id="enableMagenta" style="width: 18px; height: 18px; cursor: pointer;">
+                                <i class="fas fa-circle" style="color: #ff00ff;"></i>
+                                <span>Magenta Screen Detection</span>
+                            </label>
+                            <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; margin-top: 4px;">
+                                <input type="checkbox" id="enableCustom" style="width: 18px; height: 18px; cursor: pointer;">
+                                <i class="fas fa-palette"></i>
+                                <span>Custom Color Selection</span>
+                            </label>
+                        </div>
                     </div>
                     
                     <!-- Settings when color picker is used -->
@@ -770,22 +783,42 @@
                         </div>
                     </div>
 
-                    <!-- Settings when color picker is NOT used (default green detection) -->
+                    <!-- Settings for green screen detection -->
                     <div id="defaultSettings" class="settings-scenario">
-                        <h4><i class="fas fa-circle" style="color: #28a745;"></i> Default Green Screen Detection</h4>
+                        <h4><i class="fas fa-circle" style="color: #28a745;"></i> Green Screen Detection</h4>
                         <div class="setting-group">
                             <label>Color Threshold: <span class="value" id="thresholdValueDefault">0.3</span></label>
                             <input type="range" id="thresholdDefault" min="0" max="1" step="0.01" value="0.3">
                             <small>How sensitive the green detection is (lower = more strict)</small>
                         </div>
                         <div class="setting-group">
-                            <label>Saturation Threshold: <span class="value" id="saturationValue">0.4</span></label>
-                            <input type="range" id="saturation" min="0" max="1" step="0.01" value="0.4">
+                            <label>Saturation Threshold: <span class="value" id="saturationValueGreen">0.4</span></label>
+                            <input type="range" id="saturationGreen" min="0" max="1" step="0.01" value="0.4">
                             <small>Minimum color intensity required (filters out gray/desaturated pixels)</small>
                         </div>
                         <div class="setting-group">
                             <label>Smoothness: <span class="value" id="smoothnessValueDefault">0.2</span></label>
                             <input type="range" id="smoothnessDefault" min="0" max="5" step="0.1" value="0.2">
+                            <small>Edge smoothing for better blending (higher = more aggressive filtering)</small>
+                        </div>
+                    </div>
+
+                    <!-- Settings for magenta screen detection -->
+                    <div id="magentaSettings" class="settings-scenario" style="display: none;">
+                        <h4><i class="fas fa-circle" style="color: #ff00ff;"></i> Magenta Screen Detection</h4>
+                        <div class="setting-group">
+                            <label>Color Threshold: <span class="value" id="thresholdValueMagenta">0.3</span></label>
+                            <input type="range" id="thresholdMagenta" min="0" max="1" step="0.01" value="0.3">
+                            <small>How sensitive the magenta detection is (lower = more strict)</small>
+                        </div>
+                        <div class="setting-group">
+                            <label>Saturation Threshold: <span class="value" id="saturationValueMagenta">0.4</span></label>
+                            <input type="range" id="saturationMagenta" min="0" max="1" step="0.01" value="0.4">
+                            <small>Minimum color intensity required (filters out gray/desaturated pixels)</small>
+                        </div>
+                        <div class="setting-group">
+                            <label>Smoothness: <span class="value" id="smoothnessValueMagenta">0.2</span></label>
+                            <input type="range" id="smoothnessMagenta" min="0" max="5" step="0.1" value="0.2">
                             <small>Edge smoothing for better blending (higher = more aggressive filtering)</small>
                         </div>
                     </div>
@@ -865,22 +898,36 @@
         
         const thresholdSlider = document.getElementById('threshold');
         const thresholdSliderDefault = document.getElementById('thresholdDefault');
-        const saturationSlider = document.getElementById('saturation');
+        const saturationSliderGreen = document.getElementById('saturationGreen');
         const smoothnessSlider = document.getElementById('smoothness');
         const smoothnessSliderDefault = document.getElementById('smoothnessDefault');
         
         const thresholdValue = document.getElementById('thresholdValue');
         const thresholdValueDefault = document.getElementById('thresholdValueDefault');
-        const saturationValue = document.getElementById('saturationValue');
+        const saturationValueGreen = document.getElementById('saturationValueGreen');
         const smoothnessValue = document.getElementById('smoothnessValue');
         const smoothnessValueDefault = document.getElementById('smoothnessValueDefault');
         
         const colorPickerSettings = document.getElementById('colorPickerSettings');
         const defaultSettings = document.getElementById('defaultSettings');
-        const approachSelect = document.getElementById('approachSelect');
+        const magentaSettings = document.getElementById('magentaSettings');
+        const enableGreen = document.getElementById('enableGreen');
+        const enableMagenta = document.getElementById('enableMagenta');
+        const enableCustom = document.getElementById('enableCustom');
         const resetFilterBtn = document.getElementById('resetFilterBtn');
         
-        let currentApproach = 'default'; // 'default' or 'custom'
+        // Magenta settings elements
+        const thresholdSliderMagenta = document.getElementById('thresholdMagenta');
+        const saturationSliderMagenta = document.getElementById('saturationMagenta');
+        const smoothnessSliderMagenta = document.getElementById('smoothnessMagenta');
+        const thresholdValueMagenta = document.getElementById('thresholdValueMagenta');
+        const saturationValueMagenta = document.getElementById('saturationValueMagenta');
+        const smoothnessValueMagenta = document.getElementById('smoothnessValueMagenta');
+        
+        // Track which filters are enabled
+        let enableGreenFilter = true;  // Green enabled by default
+        let enableMagentaFilter = false;
+        let enableCustomFilter = false;
 
         let video = document.createElement('video');
         video.muted = true; // Default to muted
@@ -891,27 +938,51 @@
         let isRepeating = false;
         let isSeeking = false;
 
-        // Settings (initial values for default green screen mode)
+        // Settings (separate values for green, magenta, and custom)
         let settings = {
-            threshold: 0.3,
-            saturation: 0.4,
-            smoothness: 0.2
+            green: {
+                threshold: 0.3,
+                saturation: 0.4,
+                smoothness: 0.2
+            },
+            magenta: {
+                threshold: 0.3,
+                saturation: 0.4,
+                smoothness: 0.2
+            },
+            custom: {
+                threshold: 0.5,
+                smoothness: 1.5
+            }
         };
 
-        // Function to update settings visibility based on selected approach
+        // Function to update settings visibility based on enabled filters
         function updateSettingsVisibility() {
-            if (currentApproach === 'custom') {
-                // Custom color approach - show custom color settings
-                colorPickerSettings.style.display = 'block';
-                defaultSettings.style.display = 'none';
-                colorPickerSettings.classList.add('active');
-                defaultSettings.classList.remove('active');
-            } else {
-                // Default approach - show default green detection settings
-                colorPickerSettings.style.display = 'none';
+            // Show/hide green settings
+            if (enableGreenFilter) {
                 defaultSettings.style.display = 'block';
-                colorPickerSettings.classList.remove('active');
                 defaultSettings.classList.add('active');
+            } else {
+                defaultSettings.style.display = 'none';
+                defaultSettings.classList.remove('active');
+            }
+            
+            // Show/hide magenta settings
+            if (enableMagentaFilter) {
+                magentaSettings.style.display = 'block';
+                magentaSettings.classList.add('active');
+            } else {
+                magentaSettings.style.display = 'none';
+                magentaSettings.classList.remove('active');
+            }
+            
+            // Show/hide custom color settings
+            if (enableCustomFilter) {
+                colorPickerSettings.style.display = 'block';
+                colorPickerSettings.classList.add('active');
+            } else {
+                colorPickerSettings.style.display = 'none';
+                colorPickerSettings.classList.remove('active');
             }
         }
 
@@ -924,23 +995,26 @@
             thresholdValue.textContent = '0.50';
             smoothnessValue.textContent = '1.50';
             
-            // Default green screen mode defaults
+            // Green screen mode defaults
             thresholdSliderDefault.value = 0.3;
-            saturationSlider.value = 0.4;
+            saturationSliderGreen.value = 0.4;
             smoothnessSliderDefault.value = 0.2;
             thresholdValueDefault.textContent = '0.30';
-            saturationValue.textContent = '0.40';
+            saturationValueGreen.textContent = '0.40';
             smoothnessValueDefault.textContent = '0.20';
             
-            // Reset settings based on current approach
-            if (currentApproach === 'custom') {
-                settings.threshold = 0.5;
-                settings.smoothness = 1.5;
-            } else {
-                settings.threshold = 0.3;
-                settings.saturation = 0.4;
-                settings.smoothness = 0.2;
-            }
+            // Magenta screen mode defaults
+            thresholdSliderMagenta.value = 0.3;
+            saturationSliderMagenta.value = 0.4;
+            smoothnessSliderMagenta.value = 0.2;
+            thresholdValueMagenta.textContent = '0.30';
+            saturationValueMagenta.textContent = '0.40';
+            smoothnessValueMagenta.textContent = '0.20';
+            
+            // Reset all settings to defaults
+            settings.green = { threshold: 0.3, saturation: 0.4, smoothness: 0.2 };
+            settings.magenta = { threshold: 0.3, saturation: 0.4, smoothness: 0.2 };
+            settings.custom = { threshold: 0.5, smoothness: 1.5 };
             
             // Clear selected color
             targetColor = null;
@@ -948,44 +1022,78 @@
             selectedColorDisplay.style.display = 'none';
         }
 
-        // Handle approach dropdown change
-        approachSelect.addEventListener('change', (e) => {
-            // Update approach first, then reset filter
-            currentApproach = e.target.value;
-            resetFilter();
+        // Handle checkbox changes
+        enableGreen.addEventListener('change', (e) => {
+            enableGreenFilter = e.target.checked;
             updateSettingsVisibility();
-            redrawFrame(); // Apply the selected approach immediately
+            redrawFrame();
+        });
+
+        enableMagenta.addEventListener('change', (e) => {
+            enableMagentaFilter = e.target.checked;
+            updateSettingsVisibility();
+            redrawFrame();
+        });
+
+        enableCustom.addEventListener('change', (e) => {
+            enableCustomFilter = e.target.checked;
+            if (!enableCustomFilter) {
+                targetColor = null;
+                targetHSV = null;
+                selectedColorDisplay.style.display = 'none';
+            }
+            updateSettingsVisibility();
+            redrawFrame();
         });
 
         // Update display values - Color Picker Settings (Custom mode)
         thresholdSlider.addEventListener('input', (e) => {
-            settings.threshold = parseFloat(e.target.value);
-            thresholdValue.textContent = settings.threshold.toFixed(2);
+            settings.custom.threshold = parseFloat(e.target.value);
+            thresholdValue.textContent = settings.custom.threshold.toFixed(2);
             redrawFrame();
         });
 
         smoothnessSlider.addEventListener('input', (e) => {
-            settings.smoothness = parseFloat(e.target.value);
-            smoothnessValue.textContent = settings.smoothness.toFixed(2);
+            settings.custom.smoothness = parseFloat(e.target.value);
+            smoothnessValue.textContent = settings.custom.smoothness.toFixed(2);
             redrawFrame();
         });
 
-        // Update display values - Default Settings (Green screen mode)
+        // Update display values - Green Settings
         thresholdSliderDefault.addEventListener('input', (e) => {
-            settings.threshold = parseFloat(e.target.value);
-            thresholdValueDefault.textContent = settings.threshold.toFixed(2);
+            settings.green.threshold = parseFloat(e.target.value);
+            thresholdValueDefault.textContent = settings.green.threshold.toFixed(2);
             redrawFrame();
         });
 
-        saturationSlider.addEventListener('input', (e) => {
-            settings.saturation = parseFloat(e.target.value);
-            saturationValue.textContent = settings.saturation.toFixed(2);
+        saturationSliderGreen.addEventListener('input', (e) => {
+            settings.green.saturation = parseFloat(e.target.value);
+            saturationValueGreen.textContent = settings.green.saturation.toFixed(2);
             redrawFrame();
         });
 
         smoothnessSliderDefault.addEventListener('input', (e) => {
-            settings.smoothness = parseFloat(e.target.value);
-            smoothnessValueDefault.textContent = settings.smoothness.toFixed(2);
+            settings.green.smoothness = parseFloat(e.target.value);
+            smoothnessValueDefault.textContent = settings.green.smoothness.toFixed(2);
+            redrawFrame();
+        });
+
+        // Magenta settings event listeners
+        thresholdSliderMagenta.addEventListener('input', (e) => {
+            settings.magenta.threshold = parseFloat(e.target.value);
+            thresholdValueMagenta.textContent = settings.magenta.threshold.toFixed(2);
+            redrawFrame();
+        });
+
+        saturationSliderMagenta.addEventListener('input', (e) => {
+            settings.magenta.saturation = parseFloat(e.target.value);
+            saturationValueMagenta.textContent = settings.magenta.saturation.toFixed(2);
+            redrawFrame();
+        });
+
+        smoothnessSliderMagenta.addEventListener('input', (e) => {
+            settings.magenta.smoothness = parseFloat(e.target.value);
+            smoothnessValueMagenta.textContent = settings.magenta.smoothness.toFixed(2);
             redrawFrame();
         });
 
@@ -1054,94 +1162,101 @@
             return isGreenHue && isSaturated && greenDominance;
         }
 
-        // Apply chroma key effect
+        // Check if pixel is magenta (for magenta screen mode)
+        function isMagentaPixel(r, g, b, threshold, saturation) {
+            const hsv = rgbToHsv(r, g, b);
+            
+            // Magenta hue range in HSV (roughly 270-330 degrees, or 0-30 degrees if wrapping)
+            // Magenta is between red and blue, so hue is around 300 degrees
+            const isMagentaHue = (hsv.h >= 270 && hsv.h <= 360) || (hsv.h >= 0 && hsv.h <= 30);
+            const isSaturated = hsv.s >= saturation;
+            // Magenta has high R and B, low G
+            const magentaDominance = (r > g && b > g) && (r + b) > (g * 2);
+            
+            return isMagentaHue && isSaturated && magentaDominance;
+        }
+
+        // Apply chroma key effect - supports multiple filters simultaneously
         function applyChromaKey(imageData) {
             const data = imageData.data;
-            const threshold = settings.threshold;
-            const smoothness = settings.smoothness;
-
-            // Use default green screen detection
-            if (currentApproach === 'default') {
-                for (let i = 0; i < data.length; i += 4) {
-                    const r = data[i];
-                    const g = data[i + 1];
-                    const b = data[i + 2];
-                    
-                    if (isGreenPixel(r, g, b, threshold, settings.saturation)) {
-                        // Calculate how "green" this pixel is
-                        const greenness = (g - Math.max(r, b)) / 255;
-                        const hsv = rgbToHsv(r, g, b);
-                        
-                        // More saturated green = more transparent
-                        const transparency = greenness * hsv.s;
-                        const alpha = 1 - Math.min(1, transparency * smoothness * 5);
-                        
-                        data[i + 3] = Math.round(alpha * 255);
-                        
-                        // Spill suppression on edge pixels
-                        if (alpha > 0.05 && alpha < 0.95) {
-                            const avgRB = (r + b) / 2;
-                            const spillAmount = Math.max(0, g - avgRB) * (1 - alpha);
-                            data[i + 1] = Math.max(0, Math.round(g - spillAmount));
-                        }
-                    }
-                }
-                return imageData;
-            }
-
-            // Custom color picker mode - use HSV-based matching
-            // If no color selected yet, don't apply any filter
-            if (!targetColor || !targetHSV) {
-                return imageData;
-            }
-
+            
             for (let i = 0; i < data.length; i += 4) {
                 const r = data[i];
                 const g = data[i + 1];
                 const b = data[i + 2];
+                let finalAlpha = 255; // Start fully opaque
+                let matchedGreen = false;
+                let matchedMagenta = false;
+                let matchedCustom = false;
                 
-                // Get color similarity (0 = identical to target, 1 = completely different)
-                const similarity = getColorSimilarity(r, g, b);
+                // Check green filter
+                if (enableGreenFilter && isGreenPixel(r, g, b, settings.green.threshold, settings.green.saturation)) {
+                    matchedGreen = true;
+                    const greenness = (g - Math.max(r, b)) / 255;
+                    const hsv = rgbToHsv(r, g, b);
+                    const transparency = greenness * hsv.s;
+                    const alpha = 1 - Math.min(1, transparency * settings.green.smoothness * 5);
+                    finalAlpha = Math.min(finalAlpha, Math.round(alpha * 255));
+                }
                 
-                // Threshold controls which colors are considered for removal
-                // Higher threshold = more colors are considered similar (more aggressive)
-                const effectiveThreshold = threshold * 0.5; // Scale threshold to useful range
+                // Check magenta filter
+                if (enableMagentaFilter && isMagentaPixel(r, g, b, settings.magenta.threshold, settings.magenta.saturation)) {
+                    matchedMagenta = true;
+                    const magentaStrength = ((r + b) / 2 - g) / 255;
+                    const hsv = rgbToHsv(r, g, b);
+                    const transparency = magentaStrength * hsv.s;
+                    const alpha = 1 - Math.min(1, transparency * settings.magenta.smoothness * 5);
+                    finalAlpha = Math.min(finalAlpha, Math.round(alpha * 255));
+                }
                 
-                if (similarity <= effectiveThreshold) {
-                    // Calculate alpha based on how similar the color is to the target
-                    // Closer to target = more transparent
-                    // Edge pixels (similarity near threshold) = partial transparency
-                    
-                    const distanceFromTarget = similarity / effectiveThreshold; // 0 = exact match, 1 = at threshold edge
-                    
-                    // Apply smoothness to control edge softness
-                    // Higher smoothness = softer edges (more gradual transition)
-                    const effectiveSmoothness = Math.max(0.1, smoothness);
-                    
-                    // Use power curve for smooth edge falloff
-                    // distanceFromTarget^(1/smoothness) creates softer edges as smoothness increases
-                    const alpha = Math.pow(distanceFromTarget, 1 / effectiveSmoothness);
-                    
-                    data[i + 3] = Math.round(alpha * 255);
-                    
-                    // Spill suppression for edge pixels
-                    // Reduces color contamination on semi-transparent edges
-                    if (alpha > 0.05 && alpha < 0.95) {
-                        // Determine which channel is dominant in target color
+                // Check custom color filter
+                if (enableCustomFilter && targetColor && targetHSV) {
+                    const similarity = getColorSimilarity(r, g, b);
+                    const effectiveThreshold = settings.custom.threshold * 0.5;
+                    if (similarity <= effectiveThreshold) {
+                        matchedCustom = true;
+                        const distanceFromTarget = similarity / effectiveThreshold;
+                        const effectiveSmoothness = Math.max(0.1, settings.custom.smoothness);
+                        const alpha = Math.pow(distanceFromTarget, 1 / effectiveSmoothness);
+                        finalAlpha = Math.min(finalAlpha, Math.round(alpha * 255));
+                    }
+                }
+                
+                // Apply the most transparent alpha (minimum alpha from all matching filters)
+                data[i + 3] = finalAlpha;
+                
+                // Apply spill suppression if pixel is partially transparent
+                const alpha = finalAlpha / 255;
+                if (alpha > 0.05 && alpha < 0.95) {
+                    if (matchedGreen) {
+                        // Green spill suppression
+                        const avgRB = (r + b) / 2;
+                        const spillAmount = Math.max(0, g - avgRB) * (1 - alpha) * 0.8;
+                        data[i + 1] = Math.max(0, Math.round(g - spillAmount));
+                    }
+                    if (matchedMagenta) {
+                        // Magenta spill suppression
+                        const avgRG = (r + g) / 2;
+                        const avgBG = (b + g) / 2;
+                        const spillAmountR = Math.max(0, r - avgRG) * (1 - alpha) * 0.8;
+                        const spillAmountB = Math.max(0, b - avgBG) * (1 - alpha) * 0.8;
+                        data[i] = Math.max(0, Math.round(r - spillAmountR));
+                        data[i + 2] = Math.max(0, Math.round(b - spillAmountB));
+                        // Slight boost to green to neutralize magenta tint
+                        data[i + 1] = Math.min(255, Math.round(g + (spillAmountR + spillAmountB) * 0.3));
+                    }
+                    if (matchedCustom) {
+                        // Custom color spill suppression
                         const maxTarget = Math.max(targetColor.r, targetColor.g, targetColor.b);
-                        
                         if (targetColor.g === maxTarget && targetColor.g > targetColor.r && targetColor.g > targetColor.b) {
-                            // Green screen - suppress green spill
                             const avgRB = (r + b) / 2;
                             const spillAmount = Math.max(0, g - avgRB) * (1 - alpha) * 0.8;
                             data[i + 1] = Math.max(0, Math.round(g - spillAmount));
                         } else if (targetColor.b === maxTarget && targetColor.b > targetColor.r && targetColor.b > targetColor.g) {
-                            // Blue screen - suppress blue spill
                             const avgRG = (r + g) / 2;
                             const spillAmount = Math.max(0, b - avgRG) * (1 - alpha) * 0.8;
                             data[i + 2] = Math.max(0, Math.round(b - spillAmount));
                         } else if (targetColor.r === maxTarget && targetColor.r > targetColor.g && targetColor.r > targetColor.b) {
-                            // Red screen - suppress red spill
                             const avgGB = (g + b) / 2;
                             const spillAmount = Math.max(0, r - avgGB) * (1 - alpha) * 0.8;
                             data[i] = Math.max(0, Math.round(r - spillAmount));
@@ -1149,7 +1264,7 @@
                     }
                 }
             }
-
+            
             return imageData;
         }
 

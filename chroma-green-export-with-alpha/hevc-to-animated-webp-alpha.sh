@@ -108,6 +108,28 @@ if [ -z "$VIDEO_WIDTH" ] || [ -z "$VIDEO_HEIGHT" ]; then
     exit 1
 fi
 
+# Initialize output dimensions (default to original if not scaling)
+OUTPUT_WIDTH="$VIDEO_WIDTH"
+OUTPUT_HEIGHT="$VIDEO_HEIGHT"
+
+# Calculate output dimensions if scaling is requested
+if [ -n "$SCALE_HEIGHT" ]; then
+    if ! [[ "$SCALE_HEIGHT" =~ ^[0-9]+$ ]] || [ "$SCALE_HEIGHT" -le 0 ]; then
+        echo -e "${RED}Error: Scale height must be a positive integer${NC}"
+        exit 1
+    fi
+    OUTPUT_HEIGHT="$SCALE_HEIGHT"
+    # Calculate width maintaining aspect ratio
+    if command -v bc &> /dev/null; then
+        OUTPUT_WIDTH=$(echo "scale=0; ($VIDEO_WIDTH * $SCALE_HEIGHT) / $VIDEO_HEIGHT" | bc | cut -d. -f1)
+    else
+        # Fallback using awk if bc is not available
+        OUTPUT_WIDTH=$(awk "BEGIN {printf \"%.0f\", ($VIDEO_WIDTH * $SCALE_HEIGHT) / $VIDEO_HEIGHT}")
+    fi
+    # Ensure width is even (required for video codecs)
+    OUTPUT_WIDTH=$((OUTPUT_WIDTH - (OUTPUT_WIDTH % 2)))
+fi
+
 echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 echo -e "${GREEN}HEVC to Animated WebP Converter${NC}"
 echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
@@ -181,19 +203,19 @@ WEBP_WIDTH="$OUTPUT_WIDTH"
 WEBP_HEIGHT="$OUTPUT_HEIGHT"
 
 # Try to get pixel format from ffprobe (may not work for WebP)
-WEBP_PIXFMT=$(ffprobe -v error -select_streams v:0 -show_entries stream=pix_fmt -of default=noprint_wrappers=1:nokey=1 "$OUTPUT" 2>/dev/null || echo "")
+# WEBP_PIXFMT=$(ffprobe -v error -select_streams v:0 -show_entries stream=pix_fmt -of default=noprint_wrappers=1:nokey=1 "$OUTPUT" 2>/dev/null || echo "")
 
 echo -e "  Resolution: ${WEBP_WIDTH}x${WEBP_HEIGHT}"
-if [ -n "$WEBP_PIXFMT" ]; then
-    echo -e "  Pixel fmt:  $WEBP_PIXFMT"
-    if [[ "$WEBP_PIXFMT" == *"yuva"* ]] || [[ "$WEBP_PIXFMT" == *"rgba"* ]]; then
-        echo -e "${GREEN}✓ Alpha channel preserved (${WEBP_PIXFMT})${NC}"
-    else
-        echo -e "${YELLOW}⚠ Pixel format: $WEBP_PIXFMT${NC}"
-    fi
-else
+# if [ -n "$WEBP_PIXFMT" ]; then
+#     echo -e "  Pixel fmt:  $WEBP_PIXFMT"
+#     if [[ "$WEBP_PIXFMT" == *"yuva"* ]] || [[ "$WEBP_PIXFMT" == *"rgba"* ]]; then
+#         echo -e "${GREEN}✓ Alpha channel preserved (${WEBP_PIXFMT})${NC}"
+#     else
+#         echo -e "${YELLOW}⚠ Pixel format: $WEBP_PIXFMT${NC}"
+#     fi
+# else
     echo -e "${GREEN}✓ WebP created (alpha should be preserved with yuva420p encoding)${NC}"
-fi
+# fi
 
 # Upload to S3 if bucket name provided
 if [ -n "$BUCKET_NAME" ]; then
@@ -281,7 +303,9 @@ if [ -n "$BUCKET_NAME" ]; then
     fi
     
     # Create ImageDecoder script for WebP (same as frames-to-animated-webp-alpha.sh)
-    SCRIPT_CONTENT=$(cat <<'SCRIPT_EOF'
+    # Write to temp file first to avoid heredoc parsing issues
+    SCRIPT_TEMP_FILE=$(mktemp)
+    cat > "$SCRIPT_TEMP_FILE" <<'SCRIPT_EOF'
     <script>
         (async function() {
             const canvas = document.getElementById('webpCanvas');
@@ -429,14 +453,17 @@ if [ -n "$BUCKET_NAME" ]; then
                 // Show a message to the user
                 const warning = document.createElement('div');
                 warning.style.cssText = 'position: fixed; top: 10px; left: 50%; transform: translateX(-50%); background: rgba(255, 193, 7, 0.9); color: #000; padding: 10px 20px; border-radius: 8px; font-size: 12px; z-index: 1000; max-width: 90%; text-align: center;';
-                warning.textContent = "⚠️ Your browser doesn't support ImageDecoder API. Animation will loop. Use Chrome 94+ or Edge 94+ for play-once functionality.";
+                warning.textContent = "⚠️ Your browser does not support ImageDecoder API. Animation will loop. Use Chrome 94+ or Edge 94+ for play-once functionality.";
                 document.body.appendChild(warning);
                 setTimeout(function() { warning.remove(); }, 5000);
             }
         })();
     </script>
 SCRIPT_EOF
-)
+    
+    # Read the script content and replace placeholders
+    SCRIPT_CONTENT=$(cat "$SCRIPT_TEMP_FILE")
+    rm -f "$SCRIPT_TEMP_FILE"
     
     # Replace FPS placeholder in script
     SCRIPT_TEMP=$(mktemp)
