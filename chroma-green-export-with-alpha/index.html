@@ -12,6 +12,7 @@
     <!-- Note: @ffmpeg/core@0.12.10 is loaded dynamically at runtime -->
     <!-- Export modules -->
     <script src="export-webp-frames.js"></script>
+    <script src="export-png-frames.js"></script>
     <script src="export-webm-basic.js"></script>
     <script src="export-gif.js"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
@@ -826,12 +827,11 @@
                 <label for="exportFormat">Export Format:</label>
                 <select id="exportFormat">
                     <option value="frames">Frame by Frame (ZIP of WebP images)</option>
+                    <option value="frames-png">Frame by Frame (ZIP of PNG images)</option>
                     <option value="webm">Animated Video (WebM VP9 - Basic)</option>
-                    <option value="webm-vp9-alpha">Animated Video (WebM VP9 with Alpha - Chrome)</option>
-                    <option value="hevc-alpha">Animated Video (HEVC with Alpha - iOS Safari)</option>
                     <option value="gif">Animated GIF</option>
                 </select>
-                <small>WebM VP9 Alpha works best in Chrome; HEVC Alpha works in iOS Safari</small>
+                <small>WebP/PNG/WebM support transparency; GIF has 1-bit transparency</small>
             </div>
 
             <div class="export-progress" id="exportProgress">
@@ -1615,12 +1615,10 @@
             try {
                 if (format === 'frames') {
                     await exportWebPFrames(video, videoCanvas, applyChromaKey, redrawFrame, seekAndWait, downloadBlob, getTimestamp, progressBarFill, progressText, previewBtn, isExporting);
+                } else if (format === 'frames-png') {
+                    await exportPNGFrames(video, videoCanvas, applyChromaKey, redrawFrame, seekAndWait, downloadBlob, getTimestamp, progressBarFill, progressText, previewBtn, isExporting);
                 } else if (format === 'webm') {
                     await exportWebMBasic(video, videoCanvas, seekAndWait, downloadBlob, getTimestamp, progressBarFill, progressText, previewBtn, isExporting);
-                } else if (format === 'webm-vp9-alpha') {
-                    await exportWebMVP9Alpha(fps);
-                } else if (format === 'hevc-alpha') {
-                    await exportHEVCAlpha(fps);
                 } else if (format === 'gif') {
                     await exportGIF(video, videoCanvas, applyChromaKey, redrawFrame, seekAndWait, downloadBlob, getTimestamp, progressBarFill, progressText, previewBtn, isExporting, isPlaying, drawFrame);
                 }
