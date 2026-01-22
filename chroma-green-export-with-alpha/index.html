@@ -9,12 +9,15 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/gif.js/0.2.0/gif.js"></script>
     <script src="https://unpkg.com/@ffmpeg/ffmpeg@0.12.15/dist/umd/ffmpeg.js"></script>
     <script src="https://unpkg.com/@ffmpeg/util@0.12.1/dist/umd/util.js"></script>
+    <!-- WebPXMux for animated WebP encoding -->
+    <script src="https://cdn.jsdelivr.net/npm/webpxmux@0.0.2/dist/webpxmux.js"></script>
     <!-- Note: @ffmpeg/core@0.12.10 is loaded dynamically at runtime -->
     <!-- Export modules -->
     <script src="export-webp-frames.js"></script>
     <script src="export-png-frames.js"></script>
     <script src="export-webm-basic.js"></script>
     <script src="export-gif.js"></script>
+    <script src="export-animated-webp.js"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
     <style>
         * {
@@ -93,8 +96,10 @@
             align-items: center;
             border-radius: 8px;
             overflow: hidden;
-            max-width: 100%;
-            max-height: 100%;
+            width: 100%;
+            height: 100%;
+            min-width: 100%;
+            min-height: 300px; /* Ensure minimum height for placeholder visibility */
         }
 
         .checkerboard-bg {
@@ -114,11 +119,93 @@
         }
 
         #videoCanvas {
-            display: block;
+            display: none; /* Hidden by default, shown when video is loaded */
             max-width: 100%;
             max-height: 100%;
             position: relative;
-            z-index: 1;
+            z-index: 2; /* Above placeholder */
+        }
+
+        #videoCanvas.has-video {
+            display: block;
+        }
+
+        .video-placeholder {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            width: 100%;
+            height: 100%;
+            display: flex !important; /* Force display when not hidden */
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 300px;
+            color: #999;
+            text-align: center;
+            padding: 40px;
+            background: #f8f9fa;
+            border-radius: 12px;
+            border: 3px dashed #cbd5e0;
+            z-index: 0; /* Behind canvas */
+            pointer-events: auto; /* Allow interactions */
+            box-sizing: border-box;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+        }
+
+        .video-placeholder:hover {
+            background: #e9ecef;
+            border-color: #667eea;
+            border-style: solid;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.2);
+        }
+
+        .video-placeholder:active {
+            transform: translateY(0);
+            box-shadow: 0 2px 6px rgba(102, 126, 234, 0.15);
+        }
+
+        .video-placeholder.hidden {
+            display: none !important;
+        }
+
+        .video-placeholder-icon {
+            font-size: 64px;
+            margin-bottom: 20px;
+            color: #667eea;
+            transition: transform 0.3s ease, color 0.3s ease;
+        }
+
+        .video-placeholder:hover .video-placeholder-icon {
+            transform: scale(1.1);
+            color: #5568d3;
+        }
+
+        .video-placeholder-text {
+            font-size: 20px;
+            font-weight: 600;
+            color: #495057;
+            margin-bottom: 8px;
+            transition: color 0.3s ease;
+        }
+
+        .video-placeholder:hover .video-placeholder-text {
+            color: #667eea;
+        }
+
+        .video-placeholder-subtext {
+            font-size: 14px;
+            color: #6c757d;
+            transition: color 0.3s ease;
+        }
+
+        .video-placeholder:hover .video-placeholder-subtext {
+            color: #495057;
         }
 
         .video-controls-wrapper {
@@ -714,6 +801,11 @@
                     <div class="video-container" id="videoContainer">
                         <div class="checkerboard-bg" id="checkerboardBg"></div>
                         <canvas id="videoCanvas"></canvas>
+                        <div class="video-placeholder" id="videoPlaceholder">
+                            <i class="fas fa-cloud-upload-alt video-placeholder-icon"></i>
+                            <div class="video-placeholder-text">Click to upload a video</div>
+                            <div class="video-placeholder-subtext">Or use the folder icon above to browse files</div>
+                        </div>
                     </div>
                 </div>
                 
@@ -756,6 +848,11 @@
                                 <input type="checkbox" id="enableMagenta" style="width: 18px; height: 18px; cursor: pointer;">
                                 <i class="fas fa-circle" style="color: #ff00ff;"></i>
                                 <span>Magenta Screen Detection</span>
+                            </label>
+                            <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                                <input type="checkbox" id="enableCyan" style="width: 18px; height: 18px; cursor: pointer;">
+                                <i class="fas fa-circle" style="color: #00ffff;"></i>
+                                <span>Cyan Screen Detection</span>
                             </label>
                             <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; margin-top: 4px;">
                                 <input type="checkbox" id="enableCustom" style="width: 18px; height: 18px; cursor: pointer;">
@@ -828,6 +925,26 @@
                         </div>
                     </div>
 
+                    <!-- Settings for cyan screen detection -->
+                    <div id="cyanSettings" class="settings-scenario" style="display: none;">
+                        <h4><i class="fas fa-circle" style="color: #00ffff;"></i> Cyan Screen Detection</h4>
+                        <div class="setting-group">
+                            <label>Color Threshold: <span class="value" id="thresholdValueCyan">0.3</span></label>
+                            <input type="range" id="thresholdCyan" min="0" max="1" step="0.01" value="0.3">
+                            <small>How sensitive the cyan detection is (lower = more strict)</small>
+                        </div>
+                        <div class="setting-group">
+                            <label>Saturation Threshold: <span class="value" id="saturationValueCyan">0.4</span></label>
+                            <input type="range" id="saturationCyan" min="0" max="1" step="0.01" value="0.4">
+                            <small>Minimum color intensity required (filters out gray/desaturated pixels)</small>
+                        </div>
+                        <div class="setting-group">
+                            <label>Smoothness: <span class="value" id="smoothnessValueCyan">0.2</span></label>
+                            <input type="range" id="smoothnessCyan" min="0" max="5" step="0.1" value="0.2">
+                            <small>Edge smoothing for better blending (higher = more aggressive filtering)</small>
+                        </div>
+                    </div>
+
                     <!-- Settings for region selection -->
                     <div id="regionSettings" class="settings-scenario" style="display: none;">
                         <h4><i class="fas fa-magic"></i> Region Selection</h4>
@@ -887,6 +1004,7 @@
                 <select id="exportFormat">
                     <option value="frames">Frame by Frame (ZIP of WebP images)</option>
                     <option value="frames-png">Frame by Frame (ZIP of PNG images)</option>
+                    <option value="animated-webp">Animated WebP (Single File)</option>
                     <option value="webm">Animated Video (WebM VP9 - Basic)</option>
                     <option value="gif">Animated GIF</option>
                 </select>
@@ -910,8 +1028,19 @@
     <script>
         const videoInput = document.getElementById('videoInput');
         const videoCanvas = document.getElementById('videoCanvas');
+        const videoPlaceholder = document.getElementById('videoPlaceholder');
+        const videoContainer = document.getElementById('videoContainer');
         const ctx = videoCanvas.getContext('2d', { willReadFrequently: true });
         const playPauseBtn = document.getElementById('playPauseBtn');
+        
+        // Ensure placeholder is visible by default and make it clickable
+        if (videoPlaceholder) {
+            videoPlaceholder.classList.remove('hidden');
+            // Make placeholder clickable to trigger file input
+            videoPlaceholder.addEventListener('click', () => {
+                videoInput.click();
+            });
+        }
         const repeatBtn = document.getElementById('repeatBtn');
         const muteBtn = document.getElementById('muteBtn');
         const colorPickerBtn = document.getElementById('colorPickerBtn');
@@ -937,9 +1066,11 @@
         const colorPickerSettings = document.getElementById('colorPickerSettings');
         const defaultSettings = document.getElementById('defaultSettings');
         const magentaSettings = document.getElementById('magentaSettings');
+        const cyanSettings = document.getElementById('cyanSettings');
         const regionSettings = document.getElementById('regionSettings');
         const enableGreen = document.getElementById('enableGreen');
         const enableMagenta = document.getElementById('enableMagenta');
+        const enableCyan = document.getElementById('enableCyan');
         const enableCustom = document.getElementById('enableCustom');
         const enableRegion = document.getElementById('enableRegion');
         const resetFilterBtn = document.getElementById('resetFilterBtn');
@@ -961,9 +1092,18 @@
         const saturationValueMagenta = document.getElementById('saturationValueMagenta');
         const smoothnessValueMagenta = document.getElementById('smoothnessValueMagenta');
         
+        // Cyan settings elements
+        const thresholdSliderCyan = document.getElementById('thresholdCyan');
+        const saturationSliderCyan = document.getElementById('saturationCyan');
+        const smoothnessSliderCyan = document.getElementById('smoothnessCyan');
+        const thresholdValueCyan = document.getElementById('thresholdValueCyan');
+        const saturationValueCyan = document.getElementById('saturationValueCyan');
+        const smoothnessValueCyan = document.getElementById('smoothnessValueCyan');
+        
         // Track which filters are enabled
         let enableGreenFilter = true;  // Green enabled by default
         let enableMagentaFilter = false;
+        let enableCyanFilter = false;
         let enableCustomFilter = false;
         let enableRegionFilter = false;
         
@@ -982,7 +1122,7 @@
         let isRepeating = false;
         let isSeeking = false;
 
-        // Settings (separate values for green, magenta, custom, and region)
+        // Settings (separate values for green, magenta, cyan, custom, and region)
         let settings = {
             green: {
                 threshold: 0.3,
@@ -990,6 +1130,11 @@
                 smoothness: 0.2
             },
             magenta: {
+                threshold: 0.3,
+                saturation: 0.4,
+                smoothness: 0.2
+            },
+            cyan: {
                 threshold: 0.3,
                 saturation: 0.4,
                 smoothness: 0.2
@@ -1022,6 +1167,15 @@
             } else {
                 magentaSettings.style.display = 'none';
                 magentaSettings.classList.remove('active');
+            }
+            
+            // Show/hide cyan settings
+            if (enableCyanFilter) {
+                cyanSettings.style.display = 'block';
+                cyanSettings.classList.add('active');
+            } else {
+                cyanSettings.style.display = 'none';
+                cyanSettings.classList.remove('active');
             }
             
             // Show/hide custom color settings
@@ -1068,6 +1222,14 @@
             saturationValueMagenta.textContent = '0.40';
             smoothnessValueMagenta.textContent = '0.20';
             
+            // Cyan screen mode defaults
+            thresholdSliderCyan.value = 0.3;
+            saturationSliderCyan.value = 0.4;
+            smoothnessSliderCyan.value = 0.2;
+            thresholdValueCyan.textContent = '0.30';
+            saturationValueCyan.textContent = '0.40';
+            smoothnessValueCyan.textContent = '0.20';
+            
             // Region selection mode defaults
             regionToleranceSlider.value = 0.3;
             regionSmoothnessSlider.value = 1.0;
@@ -1077,6 +1239,7 @@
             // Reset all settings to defaults
             settings.green = { threshold: 0.3, saturation: 0.4, smoothness: 0.2 };
             settings.magenta = { threshold: 0.3, saturation: 0.4, smoothness: 0.2 };
+            settings.cyan = { threshold: 0.3, saturation: 0.4, smoothness: 0.2 };
             settings.custom = { threshold: 0.5, smoothness: 1.5 };
             settings.region = { tolerance: 0.3, smoothness: 1.0 };
             
@@ -1098,6 +1261,12 @@
 
         enableMagenta.addEventListener('change', (e) => {
             enableMagentaFilter = e.target.checked;
+            updateSettingsVisibility();
+            redrawFrame();
+        });
+
+        enableCyan.addEventListener('change', (e) => {
+            enableCyanFilter = e.target.checked;
             updateSettingsVisibility();
             redrawFrame();
         });
@@ -1176,6 +1345,25 @@
         smoothnessSliderMagenta.addEventListener('input', (e) => {
             settings.magenta.smoothness = parseFloat(e.target.value);
             smoothnessValueMagenta.textContent = settings.magenta.smoothness.toFixed(2);
+            redrawFrame();
+        });
+
+        // Cyan settings event listeners
+        thresholdSliderCyan.addEventListener('input', (e) => {
+            settings.cyan.threshold = parseFloat(e.target.value);
+            thresholdValueCyan.textContent = settings.cyan.threshold.toFixed(2);
+            redrawFrame();
+        });
+
+        saturationSliderCyan.addEventListener('input', (e) => {
+            settings.cyan.saturation = parseFloat(e.target.value);
+            saturationValueCyan.textContent = settings.cyan.saturation.toFixed(2);
+            redrawFrame();
+        });
+
+        smoothnessSliderCyan.addEventListener('input', (e) => {
+            settings.cyan.smoothness = parseFloat(e.target.value);
+            smoothnessValueCyan.textContent = settings.cyan.smoothness.toFixed(2);
             redrawFrame();
         });
 
@@ -1289,6 +1477,20 @@
             return isMagentaHue && isSaturated && magentaDominance;
         }
 
+        // Check if pixel is cyan (for cyan screen mode)
+        function isCyanPixel(r, g, b, threshold, saturation) {
+            const hsv = rgbToHsv(r, g, b);
+            
+            // Cyan hue range in HSV (roughly 150-210 degrees)
+            // Cyan is between green (120) and blue (240), so hue is around 180 degrees
+            const isCyanHue = (hsv.h >= 150 && hsv.h <= 210);
+            const isSaturated = hsv.s >= saturation;
+            // Cyan has high G and B, low R
+            const cyanDominance = (g > r && b > r) && (g + b) > (r * 2);
+            
+            return isCyanHue && isSaturated && cyanDominance;
+        }
+
         // Calculate color distance (0 = identical, 1 = completely different)
         function colorDistance(r1, g1, b1, r2, g2, b2) {
             const dr = r1 - r2;
@@ -1390,6 +1592,7 @@
                 let finalAlpha = 255; // Start fully opaque
                 let matchedGreen = false;
                 let matchedMagenta = false;
+                let matchedCyan = false;
                 let matchedCustom = false;
                 let matchedRegion = false;
                 
@@ -1410,6 +1613,16 @@
                     const hsv = rgbToHsv(r, g, b);
                     const transparency = magentaStrength * hsv.s;
                     const alpha = 1 - Math.min(1, transparency * settings.magenta.smoothness * 5);
+                    finalAlpha = Math.min(finalAlpha, Math.round(alpha * 255));
+                }
+                
+                // Check cyan filter
+                if (enableCyanFilter && isCyanPixel(r, g, b, settings.cyan.threshold, settings.cyan.saturation)) {
+                    matchedCyan = true;
+                    const cyanStrength = ((g + b) / 2 - r) / 255;
+                    const hsv = rgbToHsv(r, g, b);
+                    const transparency = cyanStrength * hsv.s;
+                    const alpha = 1 - Math.min(1, transparency * settings.cyan.smoothness * 5);
                     finalAlpha = Math.min(finalAlpha, Math.round(alpha * 255));
                 }
                 
@@ -1474,6 +1687,16 @@
                         data[i + 2] = Math.max(0, Math.round(b - spillAmountB));
                         // Slight boost to green to neutralize magenta tint
                         data[i + 1] = Math.min(255, Math.round(g + (spillAmountR + spillAmountB) * 0.3));
+                    }
+                    if (matchedCyan) {
+                        // Cyan spill suppression
+                        const avgGB = (g + b) / 2;
+                        const spillAmountG = Math.max(0, g - avgGB) * (1 - alpha) * 0.8;
+                        const spillAmountB = Math.max(0, b - avgGB) * (1 - alpha) * 0.8;
+                        data[i + 1] = Math.max(0, Math.round(g - spillAmountG));
+                        data[i + 2] = Math.max(0, Math.round(b - spillAmountB));
+                        // Slight boost to red to neutralize cyan tint
+                        data[i] = Math.min(255, Math.round(r + (spillAmountG + spillAmountB) * 0.3));
                     }
                     if (matchedCustom) {
                         // Custom color spill suppression
@@ -1571,11 +1794,11 @@
             if (video.duration && video.duration > 0 && !isNaN(video.currentTime)) {
                 // Update when not seeking, or when video has ended (to keep seek bar functional)
                 if (!isSeeking || video.ended) {
-                    const progress = (video.currentTime / video.duration) * 100;
-                    // Clamp progress to valid range
-                    const clampedProgress = Math.max(0, Math.min(100, progress));
-                    seekBar.value = clampedProgress;
-                    currentTimeDisplay.textContent = formatTime(video.currentTime);
+                const progress = (video.currentTime / video.duration) * 100;
+                // Clamp progress to valid range
+                const clampedProgress = Math.max(0, Math.min(100, progress));
+                seekBar.value = clampedProgress;
+                currentTimeDisplay.textContent = formatTime(video.currentTime);
                 }
             }
         }
@@ -1624,6 +1847,7 @@
         // Video event handlers
         video.addEventListener('loadedmetadata', () => {
             resizeVideoToFit();
+            updateVideoVisibility();
             
             durationDisplay.textContent = formatTime(video.duration);
             
@@ -1642,6 +1866,7 @@
         });
 
         video.addEventListener('loadeddata', () => {
+            updateVideoVisibility();
             // Try auto-play when data is loaded
             if (video.readyState >= 2) {
                 video.play().catch(err => {
@@ -1861,16 +2086,16 @@
                 if (video.readyState >= 2) {
                     // Calculate region from clicked point
                     calculateRegionFromSeed(x, y);
-                    
-                    // Exit picker mode
+                        
+                        // Exit picker mode
                     isRegionPickerMode = false;
                     regionPickerBtn.classList.remove('active');
                     regionPickerBtn.innerHTML = '<i class="fas fa-mouse-pointer"></i> Pick Region';
-                    videoCanvas.classList.remove('picker-mode');
-                    
+                        videoCanvas.classList.remove('picker-mode');
+                        
                     // Redraw frame with region filter
-                    if (isPlaying || video.readyState >= 2) {
-                        drawFrame();
+                        if (isPlaying || video.readyState >= 2) {
+                            drawFrame();
                     }
                 }
                 return;
@@ -1926,10 +2151,54 @@
             }
         });
 
-        // File input handler
-        videoInput.addEventListener('change', (e) => {
-            const file = e.target.files[0];
-            if (file) {
+        // Store original video filename
+        let originalVideoFilename = null;
+        
+        // localStorage helper functions for storing video path
+        const STORAGE_KEY_VIDEO_PATH = 'lastVideoPath';
+        
+        function saveVideoPath(file) {
+            try {
+                // Store only the file path/name
+                // Note: We cannot automatically restore user-selected files due to browser security restrictions
+                // File inputs cannot be programmatically set, so the user will need to re-select the file
+                localStorage.setItem(STORAGE_KEY_VIDEO_PATH, file.name);
+                console.log('Video path saved to localStorage:', file.name);
+            } catch (error) {
+                console.error('Error saving video path to localStorage:', error);
+            }
+        }
+        
+        function getLastVideoPath() {
+            try {
+                return localStorage.getItem(STORAGE_KEY_VIDEO_PATH);
+            } catch (error) {
+                console.error('Error loading video path from localStorage:', error);
+                return null;
+            }
+        }
+        
+        // Function to show/hide video and placeholder
+        function updateVideoVisibility() {
+            const hasVideo = video.src && video.readyState >= 2 && video.videoWidth > 0;
+            console.log('updateVideoVisibility - hasVideo:', hasVideo, 'src:', video.src, 'readyState:', video.readyState, 'videoWidth:', video.videoWidth);
+            if (hasVideo) {
+                videoCanvas.classList.add('has-video');
+                videoPlaceholder.classList.add('hidden');
+            } else {
+                videoCanvas.classList.remove('has-video');
+                videoPlaceholder.classList.remove('hidden');
+            }
+        }
+
+        function loadVideoFile(file) {
+            // Store original filename (without extension)
+            const fullName = file.name;
+            const lastDot = fullName.lastIndexOf('.');
+            originalVideoFilename = lastDot > 0 ? fullName.substring(0, lastDot) : fullName;
+            // Sanitize filename (remove invalid characters)
+            originalVideoFilename = originalVideoFilename.replace(/[^a-zA-Z0-9_-]/g, '_');
+            
                 // Reset seek bar and time display
                 seekBar.value = 0;
                 currentTimeDisplay.textContent = '0:00';
@@ -1940,28 +2209,41 @@
                 video.load();
                 // Auto-play after loading
                 video.addEventListener('loadeddata', () => {
+                updateVideoVisibility();
                     video.play().catch(err => {
                         console.log('Auto-play prevented:', err);
                     });
                 }, { once: true });
             }
+        
+        // File input handler
+        videoInput.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (file) {
+                // Save video path to localStorage
+                saveVideoPath(file);
+                // Load the video
+                loadVideoFile(file);
+            }
         });
-
-        // Try to load input.mov by default
-        video.addEventListener('error', (e) => {
-            console.log('Could not load default video file. Please select a video file.');
-        });
-
-        // Auto-play when video can play
-        video.addEventListener('canplay', () => {
-            video.play().catch(err => {
-                console.log('Auto-play prevented:', err);
-            });
-        }, { once: true });
-
-        // Try loading input.mov if it exists
-        video.src = 'input.mov';
-        video.load();
+        
+        // Check if there's a saved video path (for reference only)
+        // Note: We cannot automatically load user-selected files due to browser security
+        const lastVideoPath = getLastVideoPath();
+        if (lastVideoPath) {
+            console.log('Last video path:', lastVideoPath, '(User needs to re-select the file)');
+        }
+        
+        // Initialize video visibility - ensure placeholder is visible by default
+        // Wait a moment for DOM to be ready
+        setTimeout(() => {
+            updateVideoVisibility();
+            // Force show placeholder if no video
+            if (!video.src || video.readyState < 2 || video.videoWidth === 0) {
+                videoPlaceholder.classList.remove('hidden');
+                videoCanvas.classList.remove('has-video');
+            }
+        }, 100);
 
         // Initialize settings visibility
         updateSettingsVisibility();
@@ -2003,6 +2285,13 @@
             const minutes = String(now.getMinutes()).padStart(2, '0');
             const seconds = String(now.getSeconds()).padStart(2, '0');
             return `${year}${month}${day}_${hours}${minutes}${seconds}`;
+        }
+
+        // Generate export filename with original name, format, FPS, and timestamp
+        function getExportFilename(format, fps, extension) {
+            const baseName = originalVideoFilename || 'export';
+            const timestamp = getTimestamp();
+            return `${baseName}_${format}_${fps}fps_${timestamp}.${extension}`;
         }
 
         // Cross-browser blob download function
@@ -2067,6 +2356,8 @@
                     await exportWebPFrames(video, videoCanvas, applyChromaKey, redrawFrame, seekAndWait, downloadBlob, getTimestamp, progressBarFill, progressText, previewBtn, isExporting);
                 } else if (format === 'frames-png') {
                     await exportPNGFrames(video, videoCanvas, applyChromaKey, redrawFrame, seekAndWait, downloadBlob, getTimestamp, progressBarFill, progressText, previewBtn, isExporting);
+                } else if (format === 'animated-webp') {
+                    await exportAnimatedWebP(video, videoCanvas, applyChromaKey, redrawFrame, seekAndWait, downloadBlob, getTimestamp, progressBarFill, progressText, previewBtn, isExporting);
                 } else if (format === 'webm') {
                     await exportWebMBasic(video, videoCanvas, seekAndWait, downloadBlob, getTimestamp, progressBarFill, progressText, previewBtn, isExporting);
                 } else if (format === 'gif') {

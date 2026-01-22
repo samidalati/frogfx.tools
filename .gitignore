@@ -46,4 +46,9 @@
 *.divx
 *.xvid
 test_frames/
-*.mov
+
+# Input folder (contains all media files)
+chroma-green-export-with-alpha/input/
+
+# Output folder (contains generated files)
+chroma-green-export-with-alpha/output/

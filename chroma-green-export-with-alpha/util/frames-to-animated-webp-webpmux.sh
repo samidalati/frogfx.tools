@@ -1,9 +1,9 @@
 #!/bin/bash
 
-# frames-to-animated-webp-alpha.sh
-# Converts WebP frames into a single animated WebP image (similar to GIF)
-# Requires: FFmpeg with WebP support
-# Usage: ./frames-to-animated-webp-alpha.sh -i <input_folder> [-f <fps>] [-o <output_file>] [-b <bucket>]
+# frames-to-animated-webp-webpmux.sh
+# Converts WebP frames into a single animated WebP image using webpmux (no loop)
+# Requires: webpmux (part of libwebp tools)
+# Usage: ./frames-to-animated-webp-webpmux.sh -i <input_folder> [-f <fps>] [-o <output_file>] [-b <bucket>]
 
 set -e
 
@@ -34,7 +34,8 @@ print_usage() {
     echo "  $0 -i ./frames -b my-animation-bucket"
     echo ""
     echo "Note: Input frames should be named sequentially (e.g., frame_00000.webp)"
-    echo "      Output is an animated WebP image (similar to GIF but better compression)"
+    echo "      Output is an animated WebP image that plays once (no loop)"
+    echo "      Uses webpmux tool instead of FFmpeg"
 }
 
 # Parse arguments
@@ -68,20 +69,30 @@ fi
 # Generate timestamp for output and S3 paths
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
 
+# Set default output directory
+OUTPUT_DIR="$(dirname "$0")/../output"
+mkdir -p "$OUTPUT_DIR"
+
 # Set default output name
 if [ -z "$OUTPUT" ]; then
-    OUTPUT="animated_webp_${TIMESTAMP}.webp"
+    OUTPUT_FILENAME="animated_webp_${TIMESTAMP}.webp"
+    OUTPUT="$OUTPUT_DIR/$OUTPUT_FILENAME"
+else
+    # If OUTPUT is provided but doesn't contain a path, use default directory
+    if [[ "$OUTPUT" != *"/"* ]]; then
+        OUTPUT="$OUTPUT_DIR/$OUTPUT"
+    fi
+    # Ensure output has .webp extension
+    if [[ ! "$OUTPUT" =~ \.webp$ ]]; then
+        OUTPUT="${OUTPUT%.*}.webp"
+    fi
 fi
 
-# Ensure output has .webp extension
-if [[ ! "$OUTPUT" =~ \.webp$ ]]; then
-    OUTPUT="${OUTPUT%.*}.webp"
-fi
-
-# Check for FFmpeg
-if ! command -v ffmpeg &> /dev/null; then
-    echo -e "${RED}Error: FFmpeg is not installed${NC}"
-    echo "Install with: brew install ffmpeg"
+# Check for webpmux
+if ! command -v webpmux &> /dev/null; then
+    echo -e "${RED}Error: webpmux is not installed${NC}"
+    echo "Install with: brew install webp"
+    echo "  or download from: https://developers.google.com/speed/webp/download"
     exit 1
 fi
 
@@ -94,14 +105,18 @@ if [ "$FRAME_COUNT" -eq 0 ]; then
 fi
 
 echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-echo -e "${GREEN}WebP Frames to Animated WebP${NC}"
+echo -e "${GREEN}WebP Frames to Animated WebP (webpmux - No Loop)${NC}"
 echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 echo -e "  Input:   $INPUT_DIR ($FRAME_COUNT frames)"
 echo -e "  Output:  $OUTPUT"
-echo -e "  Format:  Animated WebP"
-echo -e "  FPS:     $FPS"
+echo -e "  Format:  Animated WebP (play once, no loop)"
+echo -e "  FPS:     $FPS ${YELLOW}(use -f <fps> to change)${NC}"
 echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-echo ""
+if [ "$FPS" = "10" ]; then
+    echo -e "${YELLOW}⚠ Warning: Using default FPS of 10. If your frames were exported at a different FPS,${NC}"
+    echo -e "${YELLOW}   specify it with: -f <fps> (e.g., -f 30 for 30 FPS)${NC}"
+    echo ""
+fi
 
 # Create a temporary directory for sorted frames
 TEMP_DIR=$(mktemp -d)
@@ -132,25 +147,64 @@ fi
 echo -e "${GREEN}Processing ${#sorted_files[@]} frames...${NC}"
 echo ""
 
-# Use ffmpeg to create animated WebP
-# -framerate: input frame rate
-# -i: input pattern
-# -loop: number of loops (0 = infinite)
-# -lossless: use lossless compression (0 = lossy, better compression)
-# -compression_level: 0-6, higher = better compression but slower
-echo -e "${YELLOW}Creating animated WebP...${NC}"
+# Calculate frame duration in milliseconds
+# Duration = 1000ms / FPS (e.g., 30fps = 33.33ms per frame)
+# Use floating point calculation for accuracy, then round
+FRAME_DURATION_MS=$(awk "BEGIN {printf \"%.0f\", 1000 / $FPS}")
 
-ffmpeg -y \
-    -framerate "$FPS" \
-    -i "$TEMP_DIR/frame_%06d.webp" \
-    -loop 0 \
-    -lossless 0 \
-    -compression_level 6 \
-    "$OUTPUT" 2>&1 | grep -E "(frame|Duration|Stream|Output)" || true
+# Validate FPS is reasonable
+if ! awk "BEGIN {exit !($FPS > 0)}" 2>/dev/null; then
+    echo -e "${RED}Error: FPS must be greater than 0${NC}"
+    exit 1
+fi
+
+echo -e "${YELLOW}Creating animated WebP with webpmux...${NC}"
+echo -e "${CYAN}  Frame duration: ${FRAME_DURATION_MS}ms per frame${NC}"
+echo -e "${CYAN}  Loop count: 1 (play once, no loop)${NC}"
+echo ""
+
+# Build webpmux command
+# Format: webpmux -frame file.webp +duration+x+y+mi[bi] -frame file2.webp +duration+x+y+mi[bi] ... -o output.webp
+# Where:
+#   duration = frame duration in milliseconds
+#   x, y = position offset (0,0 for all frames)
+#   mi = disposal method (0 = clear after display)
+#   bi = blend method (b = blend, or omit for no blend)
+# We use +0+0+0-b format: duration + x + y + disposal + blend
+WEBPMUX_CMD="webpmux"
+
+for frame_file in "${sorted_files[@]}"; do
+    # Frame format: +duration+x+y+mi[bi]
+    # +${FRAME_DURATION_MS}+0+0+0-b means:
+    #   duration: FRAME_DURATION_MS ms
+    #   x: 0, y: 0 (no offset)
+    #   disposal: 0 (clear after display)
+    #   blend: b (blend with previous frame)
+    WEBPMUX_CMD="$WEBPMUX_CMD -frame \"$frame_file\" +${FRAME_DURATION_MS}+0+0+0-b"
+done
+
+# Add output file
+TEMP_OUTPUT="${TEMP_DIR}/temp_animated.webp"
+WEBPMUX_CMD="$WEBPMUX_CMD -o \"$TEMP_OUTPUT\""
+
+# Execute webpmux command
+echo -e "${YELLOW}Running webpmux...${NC}"
+eval $WEBPMUX_CMD
 
 # Check if output file was created
+if [ ! -f "$TEMP_OUTPUT" ]; then
+    echo -e "${RED}Error: webpmux failed to create output file${NC}"
+    exit 1
+fi
+
+# Set loop count to 1 (play once, no loop)
+# webpmux -set loop 1 input.webp -o output.webp
+echo -e "${YELLOW}Setting loop count to 1 (play once)...${NC}"
+webpmux -set loop 1 "$TEMP_OUTPUT" -o "$OUTPUT"
+
+# Check if final output file was created
 if [ ! -f "$OUTPUT" ]; then
-    echo -e "${RED}Error: Output file was not created${NC}"
+    echo -e "${RED}Error: Failed to set loop count${NC}"
     exit 1
 fi
 
@@ -164,83 +218,24 @@ echo -e "  Output:   $OUTPUT"
 echo -e "  Size:     $OUTPUT_SIZE"
 echo -e "  Frames:   ${#sorted_files[@]}"
 echo -e "  FPS:      $FPS"
+echo -e "  Loop:     1 (play once, no loop)"
 echo ""
 
 # Upload to S3 if bucket name provided
 if [ -n "$BUCKET_NAME" ]; then
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo -e "${GREEN}Uploading to S3...${NC}"
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    
-    # Check for AWS CLI
-    if ! command -v aws &> /dev/null; then
-        echo -e "${RED}Error: AWS CLI is not installed${NC}"
-        echo "Install with: brew install awscli"
-        exit 1
-    fi
+    # Get path to upload.sh script
+    UPLOAD_SCRIPT="$(dirname "$0")/upload.sh"
     
     # S3 paths
     S3_WEBP_PATH="${TIMESTAMP}/$(basename "$OUTPUT")"
     S3_HTML_PATH="${TIMESTAMP}/webp_preview.html"
     
-    # Ensure "Block Public Access" is disabled (required for object-level public access)
-    echo -e "${YELLOW}Ensuring bucket allows public object access...${NC}"
-    if aws s3api get-public-access-block --bucket "$BUCKET_NAME" &>/dev/null; then
-        echo -e "${YELLOW}  Disabling 'Block Public Access'...${NC}"
-        aws s3api put-public-access-block \
-            --bucket "$BUCKET_NAME" \
-            --public-access-block-configuration \
-            "BlockPublicAcls=false,IgnorePublicAcls=false,BlockPublicPolicy=false,RestrictPublicBuckets=false" 2>/dev/null
-    fi
-    
-    # Upload animated WebP with public read grant
-    echo -e "${YELLOW}Uploading animated WebP to s3://${BUCKET_NAME}/${S3_WEBP_PATH}...${NC}"
-    # Try using s3api put-object with grants (more reliable than ACL)
-    if aws s3api put-object \
-        --bucket "$BUCKET_NAME" \
-        --key "$S3_WEBP_PATH" \
-        --body "$OUTPUT" \
-        --content-type "image/webp" \
-        --grant-read "uri=http://acs.amazonaws.com/groups/global/AllUsers" 2>/dev/null; then
-        echo -e "${GREEN}✓ Animated WebP uploaded with public read access${NC}"
-    elif aws s3 cp "$OUTPUT" "s3://${BUCKET_NAME}/${S3_WEBP_PATH}" \
-        --content-type "image/webp" \
-        --grants read=uri=http://acs.amazonaws.com/groups/global/AllUsers 2>/dev/null; then
-        echo -e "${GREEN}✓ Animated WebP uploaded with public read access${NC}"
-    elif aws s3 cp "$OUTPUT" "s3://${BUCKET_NAME}/${S3_WEBP_PATH}" \
-        --content-type "image/webp" 2>/dev/null; then
-        echo -e "${YELLOW}⚠ Animated WebP uploaded, setting ACL...${NC}"
-        # Try to set ACL after upload
-        if aws s3api put-object-acl \
-            --bucket "$BUCKET_NAME" \
-            --key "$S3_WEBP_PATH" \
-            --acl public-read 2>/dev/null; then
-            echo -e "${GREEN}✓ Animated WebP is now publicly accessible${NC}"
-        else
-            echo -e "${YELLOW}⚠ Could not set public access${NC}"
-        fi
-    else
-        echo -e "${RED}Error: Failed to upload animated WebP to S3${NC}"
-        exit 1
-    fi
-    
-    # Get bucket region for correct URL
-    BUCKET_REGION=$(aws s3api get-bucket-location --bucket "$BUCKET_NAME" --query 'LocationConstraint' --output text 2>/dev/null || echo "us-east-1")
-    # Handle us-east-1 which returns null
-    if [ "$BUCKET_REGION" = "None" ] || [ -z "$BUCKET_REGION" ]; then
-        BUCKET_REGION="us-east-1"
-    fi
-    
-    # Use region-specific URL
-    if [ "$BUCKET_REGION" = "us-east-1" ]; then
-        WEBP_URL="https://${BUCKET_NAME}.s3.amazonaws.com/${S3_WEBP_PATH}"
-    else
-        WEBP_URL="https://${BUCKET_NAME}.s3.${BUCKET_REGION}.amazonaws.com/${S3_WEBP_PATH}"
-    fi
+    # Upload animated WebP (suppress verbose output)
+    WEBP_URL=$("$UPLOAD_SCRIPT" "$OUTPUT" "$BUCKET_NAME" "$S3_WEBP_PATH" "image/webp" 2>/dev/null | tr -d '\n\r')
     
     # Get WebP info for template (try to get dimensions from first frame)
-    WEBP_WIDTH=$(ffprobe -v error -select_streams v:0 -show_entries stream=width -of default=noprint_wrappers=1:nokey=1 "$OUTPUT" 2>/dev/null || echo "N/A")
-    WEBP_HEIGHT=$(ffprobe -v error -select_streams v:0 -show_entries stream=height -of default=noprint_wrappers=1:nokey=1 "$OUTPUT" 2>/dev/null || echo "N/A")
+    WEBP_WIDTH=$(webpmux -info "$OUTPUT" 2>/dev/null | grep -i "width" | head -1 | awk '{print $2}' || echo "N/A")
+    WEBP_HEIGHT=$(webpmux -info "$OUTPUT" 2>/dev/null | grep -i "height" | head -1 | awk '{print $2}' || echo "N/A")
     
     # Format resolution
     if [ "$WEBP_WIDTH" != "N/A" ] && [ "$WEBP_HEIGHT" != "N/A" ]; then
@@ -261,8 +256,10 @@ if [ -n "$BUCKET_NAME" ]; then
         DURATION_DISPLAY="N/A"
     fi
     
-    # Create ImageDecoder script for WebP
-    SCRIPT_CONTENT=$(cat <<'SCRIPT_EOF'
+    # Create ImageDecoder script for WebP (play once, no loop)
+    # Use a temporary file to avoid heredoc parsing issues with JavaScript parentheses
+    SCRIPT_TEMP=$(mktemp)
+    cat > "$SCRIPT_TEMP" <<'SCRIPT_EOF'
     <script>
         (async function() {
             const canvas = document.getElementById('webpCanvas');
@@ -300,7 +297,7 @@ if [ -n "$BUCKET_NAME" ]; then
                         
                         // Don't rely on frameCount - decode frames sequentially until error
                         console.log('Reported frame count:', decoder.frameCount);
-                        console.log('Starting animation (play once)...');
+                        console.log('Starting animation (play once, no loop)...');
                         
                         let lastFrame = result.image; // Store first frame
                         let hasCompleted = false; // Flag to prevent re-rendering
@@ -319,9 +316,8 @@ if [ -n "$BUCKET_NAME" ]; then
                                 const image = frame.image;
                                 frameNumber = frameIndex + 1;
                                 
-                                // Use dynamic delay to mimic 30fps video (33.33ms per frame)
-                                // Always use 30fps timing for consistent playback
-                                const delayMs = 1000 / 30; // Exactly 33.33...ms for 30fps
+                                // Use dynamic delay to mimic specified FPS
+                                const delayMs = 1000 / {{FPS}};
                                 
                                 // Draw frame to canvas
                                 ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -341,35 +337,35 @@ if [ -n "$BUCKET_NAME" ]; then
                                             // Next frame exists, render it
                                             renderFrame(frameIndex + 1);
                                         } catch (nextError) {
-                                            // No more frames - animation complete
+                                            // No more frames - animation complete (no loop)
                                             hasCompleted = true;
                                             const animationEndTime = performance.now();
                                             const totalDuration = animationEndTime - animationStartTime;
-                                            const expectedDuration = frameNumber * (1000 / 30); // Expected duration at 30fps
+                                            const expectedDuration = frameNumber * (1000 / {{FPS}});
                                             const actualFPS = frameNumber / (totalDuration / 1000);
                                             console.log(`━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
-                                            console.log(`Animation complete after ${frameNumber} frames`);
+                                            console.log(`Animation complete after ${frameNumber} frames (no loop)`);
                                             console.log(`Total animation duration: ${totalDuration.toFixed(2)}ms (${(totalDuration / 1000).toFixed(2)}s)`);
-                                            console.log(`Expected duration at 30fps: ${expectedDuration.toFixed(2)}ms (${(expectedDuration / 1000).toFixed(2)}s)`);
+                                            console.log(`Expected duration at {{FPS}}fps: ${expectedDuration.toFixed(2)}ms (${(expectedDuration / 1000).toFixed(2)}s)`);
                                             console.log(`Actual FPS: ${actualFPS.toFixed(2)}`);
                                             console.log(`━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
-                                            // Last frame is already drawn, so we're done
+                                            // Last frame is already drawn, so we're done (no loop)
                                         }
                                     }
                                 }, delayMs);
                                 
                             } catch (error) {
-                                // No more frames - keep last frame displayed and stop
+                                // No more frames - keep last frame displayed and stop (no loop)
                                 hasCompleted = true;
                                 const animationEndTime = performance.now();
                                 const totalDuration = animationEndTime - animationStartTime;
-                                const expectedDuration = frameNumber * (1000 / 30); // Expected duration at 30fps
+                                const expectedDuration = frameNumber * (1000 / {{FPS}});
                                 const actualFPS = frameNumber / (totalDuration / 1000);
                                 console.log(`Frame decode error (end): ${error.message}`);
                                 console.log(`━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
-                                console.log(`Animation complete after ${frameNumber} frames`);
+                                console.log(`Animation complete after ${frameNumber} frames (no loop)`);
                                 console.log(`Total animation duration: ${totalDuration.toFixed(2)}ms (${(totalDuration / 1000).toFixed(2)}s)`);
-                                console.log(`Expected duration at 30fps: ${expectedDuration.toFixed(2)}ms (${(expectedDuration / 1000).toFixed(2)}s)`);
+                                console.log(`Expected duration at {{FPS}}fps: ${expectedDuration.toFixed(2)}ms (${(expectedDuration / 1000).toFixed(2)}s)`);
                                 console.log(`Actual FPS: ${actualFPS.toFixed(2)}`);
                                 console.log(`━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
                                 if (lastFrame) {
@@ -384,7 +380,7 @@ if [ -n "$BUCKET_NAME" ]; then
                         setTimeout(async () => {
                             try {
                                 const testFrame = await decoder.decode({ frameIndex: 1 });
-                                console.log('Found additional frames, starting animation');
+                                console.log('Found additional frames, starting animation (play once)');
                                 renderFrame(1);
                             } catch (e) {
                                 console.log('Single frame WebP (not animated)');
@@ -413,12 +409,13 @@ if [ -n "$BUCKET_NAME" ]; then
                 warning.style.cssText = 'position: fixed; top: 10px; left: 50%; transform: translateX(-50%); background: rgba(255, 193, 7, 0.9); color: #000; padding: 10px 20px; border-radius: 8px; font-size: 12px; z-index: 1000; max-width: 90%; text-align: center;';
                 warning.textContent = "⚠️ Your browser doesn't support ImageDecoder API. Animation will loop. Use Chrome 94+ or Edge 94+ for play-once functionality.";
                 document.body.appendChild(warning);
-                setTimeout(() => warning.remove(), 5000);
+                setTimeout(function() { warning.remove(); }, 5000);
             }
         })();
     </script>
 SCRIPT_EOF
-)
+    SCRIPT_CONTENT=$(cat "$SCRIPT_TEMP")
+    rm -f "$SCRIPT_TEMP"
     
     # Read template and replace placeholders
     TEMPLATE_PATH="$(dirname "$0")/preview-template.html"
@@ -427,22 +424,25 @@ SCRIPT_EOF
         exit 1
     fi
     
-    # Replace WEBP_URL placeholder in script content and write to temp file
+    # Replace WEBP_URL and FPS placeholders in script content and write to temp file
     SCRIPT_TEMP=$(mktemp)
-    echo "$SCRIPT_CONTENT" | sed "s|{{WEBP_URL}}|${WEBP_URL}|g" > "$SCRIPT_TEMP"
+    echo "$SCRIPT_CONTENT" | sed -e "s|{{WEBP_URL}}|${WEBP_URL}|g" -e "s|{{FPS}}|${FPS}|g" > "$SCRIPT_TEMP"
+    
+    # Escape WEBP_URL for sed
+    ESCAPED_WEBP_URL=$(printf '%s\n' "$WEBP_URL" | sed 's/[[\.*^$()+?{|]/\\&/g')
     
     # Create temporary HTML file
     HTML_TEMP=$(mktemp)
     # First replace all placeholders except SCRIPT_CONTENT
-    sed -e "s|{{TITLE}}|Animated WebP Preview|g" \
-        -e "s|{{DESCRIPTION}}|If the image has transparency, you should see the checkered background through transparent areas|g" \
-        -e "s|{{MEDIA_ELEMENT}}|<canvas id=\"webpCanvas\"></canvas><img id=\"webpFallback\" class=\"fallback-img\" src=\"${WEBP_URL}\" alt=\"Animated WebP\">|g" \
-        -e "s|{{FILE_TYPE}}|Animated WebP|g" \
+    sed -e "s|{{TITLE}}|Animated WebP Preview (No Loop)|g" \
+        -e "s|{{DESCRIPTION}}|If the image has transparency, you should see the checkered background through transparent areas. Animation plays once (no loop).|g" \
+        -e "s|{{MEDIA_ELEMENT}}|<canvas id=\"webpCanvas\"></canvas><img id=\"webpFallback\" class=\"fallback-img\" src=\"${ESCAPED_WEBP_URL}\" alt=\"Animated WebP\">|g" \
+        -e "s|{{FILE_TYPE}}|Animated WebP (No Loop)|g" \
         -e "s|{{RESOLUTION}}|${RESOLUTION_DISPLAY}|g" \
         -e "s|{{FPS}}|${FPS}|g" \
-        -e "s|{{ENCODING}}|WebP Animation|g" \
+        -e "s|{{ENCODING}}|WebP Animation (webpmux)|g" \
         -e "s|{{DURATION}}|${DURATION_DISPLAY}|g" \
-        -e "s|{{MEDIA_URL}}|${WEBP_URL}|g" \
+        -e "s|{{MEDIA_URL}}|${ESCAPED_WEBP_URL}|g" \
         "$TEMPLATE_PATH" > "$HTML_TEMP"
     
     # Now replace SCRIPT_CONTENT placeholder with actual script content
@@ -460,167 +460,20 @@ SCRIPT_EOF
     # Clean up script temp file
     rm -f "$SCRIPT_TEMP"
     
-    # Upload HTML with public read grant
+    # Upload HTML preview
     echo -e "${YELLOW}Uploading HTML preview to s3://${BUCKET_NAME}/${S3_HTML_PATH}...${NC}"
-    # Try using s3api put-object with grants (more reliable than ACL)
-    if aws s3api put-object \
-        --bucket "$BUCKET_NAME" \
-        --key "$S3_HTML_PATH" \
-        --body "$HTML_TEMP" \
-        --content-type "text/html" \
-        --grant-read "uri=http://acs.amazonaws.com/groups/global/AllUsers" 2>/dev/null; then
-        echo -e "${GREEN}✓ HTML uploaded with public read access${NC}"
-    elif aws s3 cp "$HTML_TEMP" "s3://${BUCKET_NAME}/${S3_HTML_PATH}" \
-        --content-type "text/html" \
-        --grants read=uri=http://acs.amazonaws.com/groups/global/AllUsers 2>/dev/null; then
-        echo -e "${GREEN}✓ HTML uploaded with public read access${NC}"
-    elif aws s3 cp "$HTML_TEMP" "s3://${BUCKET_NAME}/${S3_HTML_PATH}" \
-        --content-type "text/html" 2>/dev/null; then
-        echo -e "${YELLOW}⚠ HTML uploaded, setting ACL...${NC}"
-        # Try to set ACL after upload
-        if aws s3api put-object-acl \
-            --bucket "$BUCKET_NAME" \
-            --key "$S3_HTML_PATH" \
-            --acl public-read 2>/dev/null; then
-            echo -e "${GREEN}✓ HTML is now publicly accessible${NC}"
-        else
-            echo -e "${YELLOW}⚠ Could not set public access${NC}"
-        fi
-    else
-        echo -e "${RED}Error: Failed to upload HTML to S3${NC}"
-        rm -f "$HTML_TEMP"
-        exit 1
-    fi
+    HTML_PUBLIC_URL=$("$UPLOAD_SCRIPT" "$HTML_TEMP" "$BUCKET_NAME" "$S3_HTML_PATH" "text/html" | tr -d '\n\r')
     
     # Clean up temp file
     rm -f "$HTML_TEMP"
     
-    # Print URLs (use region-specific URL for better compatibility)
-    if [ "$BUCKET_REGION" = "us-east-1" ]; then
-        WEBP_PUBLIC_URL="https://${BUCKET_NAME}.s3.amazonaws.com/${S3_WEBP_PATH}"
-        HTML_PUBLIC_URL="https://${BUCKET_NAME}.s3.amazonaws.com/${S3_HTML_PATH}"
-    else
-        WEBP_PUBLIC_URL="https://${BUCKET_NAME}.s3.${BUCKET_REGION}.amazonaws.com/${S3_WEBP_PATH}"
-        HTML_PUBLIC_URL="https://${BUCKET_NAME}.s3.${BUCKET_REGION}.amazonaws.com/${S3_HTML_PATH}"
-    fi
-    
-    echo ""
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo -e "${GREEN}✓ Upload complete!${NC}"
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    # Print only the final URLs
     echo ""
     echo -e "${GREEN}Animated WebP URL:${NC}"
-    echo -e "  ${WEBP_PUBLIC_URL}"
+    echo -e "  ${WEBP_URL}"
     echo ""
     echo -e "${GREEN}HTML Preview URL:${NC}"
     echo -e "  ${HTML_PUBLIC_URL}"
-    echo ""
-    
-    # Check and disable "Block Public Access" if needed (required for object-level public access)
-    echo -e "${YELLOW}Checking bucket public access settings...${NC}"
-    if aws s3api get-public-access-block --bucket "$BUCKET_NAME" &>/dev/null; then
-        echo -e "${YELLOW}⚠ Bucket has 'Block Public Access' enabled${NC}"
-        echo -e "${YELLOW}  Disabling to allow object-level public access...${NC}"
-        
-        # Disable all public access blocks
-        if aws s3api put-public-access-block \
-            --bucket "$BUCKET_NAME" \
-            --public-access-block-configuration \
-            "BlockPublicAcls=false,IgnorePublicAcls=false,BlockPublicPolicy=false,RestrictPublicBuckets=false" 2>/dev/null; then
-            echo -e "${GREEN}✓ 'Block Public Access' disabled${NC}"
-            echo -e "${YELLOW}  Retrying to set objects as public...${NC}"
-            
-            # Retry setting ACLs now that block is disabled
-            if aws s3api put-object-acl \
-                --bucket "$BUCKET_NAME" \
-                --key "$S3_WEBP_PATH" \
-                --acl public-read 2>/dev/null && \
-               aws s3api put-object-acl \
-                --bucket "$BUCKET_NAME" \
-                --key "$S3_HTML_PATH" \
-                --acl public-read 2>/dev/null; then
-                echo -e "${GREEN}✓ Objects are now publicly accessible${NC}"
-            else
-                echo -e "${YELLOW}⚠ Bucket doesn't support ACLs - setting bucket policy instead${NC}"
-                # Set bucket policy for public read access
-                POLICY_JSON=$(cat <<POLICY_EOF
-{
-  "Version": "2012-10-17",
-  "Statement": [
-    {
-      "Sid": "PublicReadGetObject",
-      "Effect": "Allow",
-      "Principal": "*",
-      "Action": "s3:GetObject",
-      "Resource": "arn:aws:s3:::${BUCKET_NAME}/*"
-    }
-  ]
-}
-POLICY_EOF
-)
-                POLICY_TEMP=$(mktemp)
-                echo "$POLICY_JSON" > "$POLICY_TEMP"
-                
-                if aws s3api put-bucket-policy \
-                    --bucket "$BUCKET_NAME" \
-                    --policy "file://${POLICY_TEMP}" 2>/dev/null; then
-                    echo -e "${GREEN}✓ Bucket policy set for public read access${NC}"
-                    rm -f "$POLICY_TEMP"
-                    sleep 2  # Wait for policy to propagate
-                else
-                    echo -e "${RED}✗ Could not set bucket policy${NC}"
-                    echo -e "${YELLOW}  You may need to set it manually${NC}"
-                    rm -f "$POLICY_TEMP"
-                fi
-            fi
-        else
-            echo -e "${RED}✗ Could not disable 'Block Public Access'${NC}"
-            echo -e "${YELLOW}  You may need to do this manually via AWS Console${NC}"
-            echo ""
-            echo -e "${YELLOW}To allow public objects:${NC}"
-            echo "  1. Go to S3 → ${BUCKET_NAME} → Permissions"
-            echo "  2. Edit 'Block public access' settings"
-            echo "  3. Uncheck all 4 options and save"
-            echo ""
-        fi
-    else
-        echo -e "${GREEN}✓ 'Block Public Access' is not enabled${NC}"
-    fi
-    
-    # Verify public access
-    echo -e "${YELLOW}Verifying public access...${NC}"
-    sleep 1
-    HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "${WEBP_PUBLIC_URL}" 2>/dev/null || echo "000")
-    
-    if [ "$HTTP_CODE" = "200" ]; then
-        echo -e "${GREEN}✓ URLs are publicly accessible${NC}"
-    elif [ "$HTTP_CODE" = "403" ] || [ "$HTTP_CODE" = "000" ]; then
-        echo -e "${RED}✗ URLs return HTTP ${HTTP_CODE} - Access Denied${NC}"
-        echo ""
-        echo -e "${YELLOW}To fix this, run:${NC}"
-        echo ""
-        echo "aws s3api put-bucket-policy --bucket ${BUCKET_NAME} --policy file://<(cat <<'POLICY'
-{
-  \"Version\": \"2012-10-17\",
-  \"Statement\": [{
-    \"Sid\": \"PublicReadGetObject\",
-    \"Effect\": \"Allow\",
-    \"Principal\": \"*\",
-    \"Action\": \"s3:GetObject\",
-    \"Resource\": \"arn:aws:s3:::${BUCKET_NAME}/*\"
-  }]
-}
-POLICY
-)"
-        echo ""
-        echo -e "${YELLOW}Or configure via AWS Console:${NC}"
-        echo "  1. Go to S3 → ${BUCKET_NAME} → Permissions → Bucket Policy"
-        echo "  2. Add the policy above"
-        echo "  3. Also check 'Block public access' settings and allow public access"
-        echo ""
-    else
-        echo -e "${YELLOW}⚠ Got HTTP ${HTTP_CODE} - may need time to propagate${NC}"
-    fi
 else
     echo ""
     echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
@@ -635,6 +488,7 @@ else
     echo "   <img src=\"$OUTPUT\" alt=\"Animated WebP\">"
     echo ""
     echo "3. Animated WebP works in Chrome, Firefox, and Edge"
+    echo "   Note: Animation is set to play once (no loop)"
     echo "   For older browsers, consider using GIF format"
     echo ""
     echo "4. To upload to S3, use the -b option:"

@@ -86,15 +86,24 @@ fi
 # Generate timestamp for output
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
 
+# Set default output directory
+OUTPUT_DIR="$(dirname "$0")/../output"
+mkdir -p "$OUTPUT_DIR"
+
 # Set default output name
 if [ -z "$OUTPUT" ]; then
     INPUT_BASE=$(basename "$INPUT" | sed 's/\.[^.]*$//')
-    OUTPUT="animated_webp_${INPUT_BASE}_${TIMESTAMP}.webp"
-fi
-
-# Ensure output has .webp extension
-if [[ ! "$OUTPUT" =~ \.webp$ ]]; then
-    OUTPUT="${OUTPUT%.*}.webp"
+    OUTPUT_FILENAME="animated_webp_${INPUT_BASE}_${TIMESTAMP}.webp"
+    OUTPUT="$OUTPUT_DIR/$OUTPUT_FILENAME"
+else
+    # If OUTPUT is provided but doesn't contain a path, use default directory
+    if [[ "$OUTPUT" != *"/"* ]]; then
+        OUTPUT="$OUTPUT_DIR/$OUTPUT"
+    fi
+    # Ensure output has .webp extension
+    if [[ ! "$OUTPUT" =~ \.webp$ ]]; then
+        OUTPUT="${OUTPUT%.*}.webp"
+    fi
 fi
 
 # Get video info
@@ -219,73 +228,15 @@ echo -e "  Resolution: ${WEBP_WIDTH}x${WEBP_HEIGHT}"
 
 # Upload to S3 if bucket name provided
 if [ -n "$BUCKET_NAME" ]; then
-    echo ""
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo -e "${GREEN}Uploading to S3...${NC}"
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    
-    # Check for AWS CLI
-    if ! command -v aws &> /dev/null; then
-        echo -e "${RED}Error: AWS CLI is not installed${NC}"
-        echo "Install with: brew install awscli"
-        exit 1
-    fi
+    # Get path to upload.sh script
+    UPLOAD_SCRIPT="$(dirname "$0")/upload.sh"
     
     # S3 paths
     S3_WEBP_PATH="${TIMESTAMP}/$(basename "$OUTPUT")"
     S3_HTML_PATH="${TIMESTAMP}/webp_preview.html"
     
-    # Ensure "Block Public Access" is disabled
-    echo -e "${YELLOW}Ensuring bucket allows public object access...${NC}"
-    if aws s3api get-public-access-block --bucket "$BUCKET_NAME" &>/dev/null; then
-        echo -e "${YELLOW}  Disabling 'Block Public Access'...${NC}"
-        aws s3api put-public-access-block \
-            --bucket "$BUCKET_NAME" \
-            --public-access-block-configuration \
-            "BlockPublicAcls=false,IgnorePublicAcls=false,BlockPublicPolicy=false,RestrictPublicBuckets=false" 2>/dev/null
-    fi
-    
-    # Upload WebP
-    echo -e "${YELLOW}Uploading WebP to s3://${BUCKET_NAME}/${S3_WEBP_PATH}...${NC}"
-    if aws s3api put-object \
-        --bucket "$BUCKET_NAME" \
-        --key "$S3_WEBP_PATH" \
-        --body "$OUTPUT" \
-        --content-type "image/webp" \
-        --grant-read "uri=http://acs.amazonaws.com/groups/global/AllUsers" 2>/dev/null; then
-        echo -e "${GREEN}✓ WebP uploaded with public read access${NC}"
-    elif aws s3 cp "$OUTPUT" "s3://${BUCKET_NAME}/${S3_WEBP_PATH}" \
-        --content-type "image/webp" \
-        --grants read=uri=http://acs.amazonaws.com/groups/global/AllUsers 2>/dev/null; then
-        echo -e "${GREEN}✓ WebP uploaded with public read access${NC}"
-    elif aws s3 cp "$OUTPUT" "s3://${BUCKET_NAME}/${S3_WEBP_PATH}" \
-        --content-type "image/webp" 2>/dev/null; then
-        echo -e "${YELLOW}⚠ WebP uploaded, setting ACL...${NC}"
-        if aws s3api put-object-acl \
-            --bucket "$BUCKET_NAME" \
-            --key "$S3_WEBP_PATH" \
-            --acl public-read 2>/dev/null; then
-            echo -e "${GREEN}✓ WebP is now publicly accessible${NC}"
-        else
-            echo -e "${YELLOW}⚠ Could not set public access${NC}"
-        fi
-    else
-        echo -e "${RED}Error: Failed to upload WebP to S3${NC}"
-        exit 1
-    fi
-    
-    # Get bucket region for correct URL
-    BUCKET_REGION=$(aws s3api get-bucket-location --bucket "$BUCKET_NAME" --query 'LocationConstraint' --output text 2>/dev/null || echo "us-east-1")
-    if [ "$BUCKET_REGION" = "None" ] || [ -z "$BUCKET_REGION" ]; then
-        BUCKET_REGION="us-east-1"
-    fi
-    
-    # Use region-specific URL
-    if [ "$BUCKET_REGION" = "us-east-1" ]; then
-        WEBP_URL="https://${BUCKET_NAME}.s3.amazonaws.com/${S3_WEBP_PATH}"
-    else
-        WEBP_URL="https://${BUCKET_NAME}.s3.${BUCKET_REGION}.amazonaws.com/${S3_WEBP_PATH}"
-    fi
+    # Upload WebP (suppress verbose output)
+    WEBP_URL=$("$UPLOAD_SCRIPT" "$OUTPUT" "$BUCKET_NAME" "$S3_WEBP_PATH" "image/webp" 2>/dev/null | tr -d '\n\r')
     
     # Get WebP info for template
     RESOLUTION_DISPLAY="${WEBP_WIDTH}x${WEBP_HEIGHT}"
@@ -465,9 +416,12 @@ SCRIPT_EOF
     SCRIPT_CONTENT=$(cat "$SCRIPT_TEMP_FILE")
     rm -f "$SCRIPT_TEMP_FILE"
     
+    # Escape WEBP_URL for sed
+    ESCAPED_WEBP_URL=$(printf '%s\n' "$WEBP_URL" | sed 's/[[\.*^$()+?{|]/\\&/g')
+    
     # Replace FPS placeholder in script
     SCRIPT_TEMP=$(mktemp)
-    echo "$SCRIPT_CONTENT" | sed "s|{{WEBP_URL}}|${WEBP_URL}|g" | sed "s|{{FPS}}|${FPS}|g" > "$SCRIPT_TEMP"
+    echo "$SCRIPT_CONTENT" | sed "s|{{WEBP_URL}}|${ESCAPED_WEBP_URL}|g" | sed "s|{{FPS}}|${FPS}|g" > "$SCRIPT_TEMP"
     
     # Read template and replace placeholders
     TEMPLATE_PATH="$(dirname "$0")/preview-template.html"
@@ -481,13 +435,13 @@ SCRIPT_EOF
     # First replace all placeholders except SCRIPT_CONTENT
     sed -e "s|{{TITLE}}|Animated WebP Preview (from HEVC)|g" \
         -e "s|{{DESCRIPTION}}|HEVC video converted to animated WebP with alpha. If the image has transparency, you should see the checkered background through transparent areas|g" \
-        -e "s|{{MEDIA_ELEMENT}}|<canvas id=\"webpCanvas\"></canvas><img id=\"webpFallback\" class=\"fallback-img\" src=\"${WEBP_URL}\" alt=\"Animated WebP\">|g" \
+        -e "s|{{MEDIA_ELEMENT}}|<canvas id=\"webpCanvas\"></canvas><img id=\"webpFallback\" class=\"fallback-img\" src=\"${ESCAPED_WEBP_URL}\" alt=\"Animated WebP\">|g" \
         -e "s|{{FILE_TYPE}}|Animated WebP|g" \
         -e "s|{{RESOLUTION}}|${RESOLUTION_DISPLAY}|g" \
         -e "s|{{FPS}}|${FPS}|g" \
         -e "s|{{ENCODING}}|WebP Animation (from HEVC)|g" \
         -e "s|{{DURATION}}|${DURATION_DISPLAY}|g" \
-        -e "s|{{MEDIA_URL}}|${WEBP_URL}|g" \
+        -e "s|{{MEDIA_URL}}|${ESCAPED_WEBP_URL}|g" \
         "$TEMPLATE_PATH" > "$HTML_TEMP"
     
     # Now replace SCRIPT_CONTENT placeholder with actual script content
@@ -505,57 +459,16 @@ SCRIPT_EOF
     # Clean up script temp file
     rm -f "$SCRIPT_TEMP"
     
-    # Upload HTML with public read grant
-    echo -e "${YELLOW}Uploading HTML preview to s3://${BUCKET_NAME}/${S3_HTML_PATH}...${NC}"
-    # Try using s3api put-object with grants (more reliable than ACL)
-    if aws s3api put-object \
-        --bucket "$BUCKET_NAME" \
-        --key "$S3_HTML_PATH" \
-        --body "$HTML_TEMP" \
-        --content-type "text/html" \
-        --grant-read "uri=http://acs.amazonaws.com/groups/global/AllUsers" 2>/dev/null; then
-        echo -e "${GREEN}✓ HTML uploaded with public read access${NC}"
-    elif aws s3 cp "$HTML_TEMP" "s3://${BUCKET_NAME}/${S3_HTML_PATH}" \
-        --content-type "text/html" \
-        --grants read=uri=http://acs.amazonaws.com/groups/global/AllUsers 2>/dev/null; then
-        echo -e "${GREEN}✓ HTML uploaded with public read access${NC}"
-    elif aws s3 cp "$HTML_TEMP" "s3://${BUCKET_NAME}/${S3_HTML_PATH}" \
-        --content-type "text/html" 2>/dev/null; then
-        echo -e "${YELLOW}⚠ HTML uploaded, setting ACL...${NC}"
-        # Try to set ACL after upload
-        if aws s3api put-object-acl \
-            --bucket "$BUCKET_NAME" \
-            --key "$S3_HTML_PATH" \
-            --acl public-read 2>/dev/null; then
-            echo -e "${GREEN}✓ HTML is now publicly accessible${NC}"
-        else
-            echo -e "${YELLOW}⚠ Could not set public access${NC}"
-        fi
-    else
-        echo -e "${RED}Error: Failed to upload HTML to S3${NC}"
-        rm -f "$HTML_TEMP"
-        exit 1
-    fi
+    # Upload HTML preview (suppress verbose output)
+    HTML_PUBLIC_URL=$("$UPLOAD_SCRIPT" "$HTML_TEMP" "$BUCKET_NAME" "$S3_HTML_PATH" "text/html" 2>/dev/null | tr -d '\n\r')
     
     # Clean up temp file
     rm -f "$HTML_TEMP"
     
-    # Print URLs (use region-specific URL for better compatibility)
-    if [ "$BUCKET_REGION" = "us-east-1" ]; then
-        WEBP_PUBLIC_URL="https://${BUCKET_NAME}.s3.amazonaws.com/${S3_WEBP_PATH}"
-        HTML_PUBLIC_URL="https://${BUCKET_NAME}.s3.amazonaws.com/${S3_HTML_PATH}"
-    else
-        WEBP_PUBLIC_URL="https://${BUCKET_NAME}.s3.${BUCKET_REGION}.amazonaws.com/${S3_WEBP_PATH}"
-        HTML_PUBLIC_URL="https://${BUCKET_NAME}.s3.${BUCKET_REGION}.amazonaws.com/${S3_HTML_PATH}"
-    fi
-    
-    echo ""
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo -e "${GREEN}✓ Upload complete!${NC}"
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    # Print only the final URLs
     echo ""
     echo -e "${GREEN}WebP URL:${NC}"
-    echo -e "  ${WEBP_PUBLIC_URL}"
+    echo -e "  ${WEBP_URL}"
     echo ""
     echo -e "${GREEN}HTML Preview URL:${NC}"
     echo -e "  ${HTML_PUBLIC_URL}"

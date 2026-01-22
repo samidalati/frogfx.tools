@@ -79,16 +79,25 @@ fi
 # Generate timestamp for output and S3 paths
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
 
+# Set default output directory
+OUTPUT_DIR="$(dirname "$0")/../output"
+mkdir -p "$OUTPUT_DIR"
+
 # Set default output name
 if [ -z "$OUTPUT" ]; then
     IMAGE_BASE=$(basename "$IMAGE" | sed 's/\.[^.]*$//')
     WEBP_BASE=$(basename "$WEBP" | sed 's/\.[^.]*$//')
-    OUTPUT="overlay_webp_${IMAGE_BASE}_${WEBP_BASE}_${TIMESTAMP}.webm"
-fi
-
-# Ensure output has .webm extension
-if [[ ! "$OUTPUT" =~ \.webm$ ]]; then
-    OUTPUT="${OUTPUT%.*}.webm"
+    OUTPUT_FILENAME="overlay_webp_${IMAGE_BASE}_${WEBP_BASE}_${TIMESTAMP}.webm"
+    OUTPUT="$OUTPUT_DIR/$OUTPUT_FILENAME"
+else
+    # If OUTPUT is provided but doesn't contain a path, use default directory
+    if [[ "$OUTPUT" != *"/"* ]]; then
+        OUTPUT="$OUTPUT_DIR/$OUTPUT"
+    fi
+    # Ensure output has .webm extension
+    if [[ ! "$OUTPUT" =~ \.webm$ ]]; then
+        OUTPUT="${OUTPUT%.*}.webm"
+    fi
 fi
 
 # Check for FFmpeg
@@ -305,118 +314,20 @@ fi
 
 # Upload to S3 if bucket name provided
 if [ -n "$BUCKET_NAME" ]; then
-    echo ""
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo -e "${GREEN}Uploading to S3...${NC}"
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    
-    # Check for AWS CLI
-    if ! command -v aws &> /dev/null; then
-        echo -e "${RED}Error: AWS CLI is not installed${NC}"
-        echo "Install with: brew install awscli"
-        exit 1
-    fi
+    # Get path to upload.sh script
+    UPLOAD_SCRIPT="$(dirname "$0")/upload.sh"
     
     # S3 paths
     S3_VIDEO_PATH="${TIMESTAMP}/$(basename "$OUTPUT")"
     
-    # Ensure "Block Public Access" is disabled
-    echo -e "${YELLOW}Ensuring bucket allows public object access...${NC}"
-    if aws s3api get-public-access-block --bucket "$BUCKET_NAME" &>/dev/null; then
-        echo -e "${YELLOW}  Disabling 'Block Public Access'...${NC}"
-        aws s3api put-public-access-block \
-            --bucket "$BUCKET_NAME" \
-            --public-access-block-configuration \
-            "BlockPublicAcls=false,IgnorePublicAcls=false,BlockPublicPolicy=false,RestrictPublicBuckets=false" 2>/dev/null
-    fi
+    # Upload video (suppress verbose output)
+    VIDEO_PUBLIC_URL=$("$UPLOAD_SCRIPT" "$OUTPUT" "$BUCKET_NAME" "$S3_VIDEO_PATH" "video/webm" 2>/dev/null | tr -d '\n\r')
     
-    # Upload video
-    echo -e "${YELLOW}Uploading video to s3://${BUCKET_NAME}/${S3_VIDEO_PATH}...${NC}"
-    if aws s3api put-object \
-        --bucket "$BUCKET_NAME" \
-        --key "$S3_VIDEO_PATH" \
-        --body "$OUTPUT" \
-        --content-type "video/webm" \
-        --grant-read "uri=http://acs.amazonaws.com/groups/global/AllUsers" 2>/dev/null; then
-        echo -e "${GREEN}✓ Video uploaded with public read access${NC}"
-    elif aws s3 cp "$OUTPUT" "s3://${BUCKET_NAME}/${S3_VIDEO_PATH}" \
-        --content-type "video/webm" \
-        --grants read=uri=http://acs.amazonaws.com/groups/global/AllUsers 2>/dev/null; then
-        echo -e "${GREEN}✓ Video uploaded with public read access${NC}"
-    elif aws s3 cp "$OUTPUT" "s3://${BUCKET_NAME}/${S3_VIDEO_PATH}" \
-        --content-type "video/webm" 2>/dev/null; then
-        echo -e "${YELLOW}⚠ Video uploaded, setting ACL...${NC}"
-        if aws s3api put-object-acl \
-            --bucket "$BUCKET_NAME" \
-            --key "$S3_VIDEO_PATH" \
-            --acl public-read 2>/dev/null; then
-            echo -e "${GREEN}✓ Video is now publicly accessible${NC}"
-        else
-            echo -e "${YELLOW}⚠ Could not set public access${NC}"
-        fi
-    else
-        echo -e "${RED}Error: Failed to upload video to S3${NC}"
-        exit 1
-    fi
-    
-    # Get bucket region for correct URL
-    BUCKET_REGION=$(aws s3api get-bucket-location --bucket "$BUCKET_NAME" --query 'LocationConstraint' --output text 2>/dev/null || echo "us-east-1")
-    if [ "$BUCKET_REGION" = "None" ] || [ -z "$BUCKET_REGION" ]; then
-        BUCKET_REGION="us-east-1"
-    fi
-    
-    # Print URL
-    if [ "$BUCKET_REGION" = "us-east-1" ]; then
-        VIDEO_PUBLIC_URL="https://${BUCKET_NAME}.s3.amazonaws.com/${S3_VIDEO_PATH}"
-    else
-        VIDEO_PUBLIC_URL="https://${BUCKET_NAME}.s3.${BUCKET_REGION}.amazonaws.com/${S3_VIDEO_PATH}"
-    fi
-    
-    echo ""
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo -e "${GREEN}✓ Upload complete!${NC}"
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    # Print only the final URL
     echo ""
     echo -e "${GREEN}Video URL:${NC}"
     echo -e "  ${VIDEO_PUBLIC_URL}"
     echo ""
-    
-    # Try to set bucket policy if ACLs don't work
-    if aws s3api get-public-access-block --bucket "$BUCKET_NAME" &>/dev/null; then
-        if aws s3api put-public-access-block \
-            --bucket "$BUCKET_NAME" \
-            --public-access-block-configuration \
-            "BlockPublicAcls=false,IgnorePublicAcls=false,BlockPublicPolicy=false,RestrictPublicBuckets=false" 2>/dev/null; then
-            if ! aws s3api put-object-acl \
-                --bucket "$BUCKET_NAME" \
-                --key "$S3_VIDEO_PATH" \
-                --acl public-read 2>/dev/null; then
-                # Set bucket policy
-                POLICY_JSON=$(cat <<POLICY_EOF
-{
-  "Version": "2012-10-17",
-  "Statement": [
-    {
-      "Sid": "PublicReadGetObject",
-      "Effect": "Allow",
-      "Principal": "*",
-      "Action": "s3:GetObject",
-      "Resource": "arn:aws:s3:::${BUCKET_NAME}/*"
-    }
-  ]
-}
-POLICY_EOF
-)
-                POLICY_TEMP=$(mktemp)
-                echo "$POLICY_JSON" > "$POLICY_TEMP"
-                aws s3api put-bucket-policy \
-                    --bucket "$BUCKET_NAME" \
-                    --policy "file://${POLICY_TEMP}" 2>/dev/null
-                rm -f "$POLICY_TEMP"
-                sleep 2
-            fi
-        fi
-    fi
 else
     echo ""
     echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"

@@ -80,7 +80,17 @@ async function exportWebMBasic(video, videoCanvas, seekAndWait, downloadBlob, ge
         mediaRecorder.stop();
     });
     
-    const filename = `video_export_${getTimestamp()}.webm`;
+    // Get original filename from video element or use default
+    const videoInput = document.getElementById('videoInput');
+    let baseName = 'export';
+    if (videoInput && videoInput.files && videoInput.files[0]) {
+        const fullName = videoInput.files[0].name;
+        const lastDot = fullName.lastIndexOf('.');
+        baseName = lastDot > 0 ? fullName.substring(0, lastDot) : fullName;
+        baseName = baseName.replace(/[^a-zA-Z0-9_-]/g, '_');
+    }
+    const timestamp = getTimestamp();
+    const filename = `${baseName}_webm_${fps}fps_${timestamp}.webm`;
     
     // Download the video (cross-browser compatible)
     await downloadBlob(blob, filename);
