@@ -1,68 +1,39 @@
-# Chroma Key Green Screen Export with Alpha Channel
+# Chroma Key Green Screen Export
 
-A web-based tool for removing green screen backgrounds from videos with support for exporting to webp frames, gif, webm videos with transparent backgrounds
+Web-based tool for removing green screen (or any color) backgrounds from videos with real-time preview and multiple export formats.
+
+## How It Works
+
+1. **Load a video** - Click the upload area or folder icon to select a video file
+2. **Adjust filters** - Use sliders to fine-tune color detection, saturation, and edge smoothing
+3. **Export** - Choose format (WebP frames, PNG frames, WebM, GIF, or Animated WebP) and FPS
+4. **Preview** - Test exported files with transparency on a colored background
+
+The tool uses HTML5 Canvas to process each frame in real-time, converting RGB to HSV color space for accurate color matching and applying spill suppression to clean edges.
+
+## Tools & Packages
+
+### Browser Libraries (CDN)
+- **[JSZip](https://stuk.github.io/jszip/) v3.10.1** - ZIP file creation for frame exports
+- **[gif.js](https://jnordberg.github.io/gif.js/) v0.2.0** - Animated GIF encoding
+- **[@ffmpeg/ffmpeg](https://ffmpegwasm.netlify.app/) v0.12.15** - FFmpeg WebAssembly (for advanced exports)
+- **[@ffmpeg/util](https://github.com/ffmpegwasm/ffmpeg.wasm) v0.12.1** - FFmpeg utilities
+- **[@ffmpeg/core](https://github.com/ffmpegwasm/ffmpeg.wasm) v0.12.6** - FFmpeg core WASM
+- **[webpxmux](https://www.npmjs.com/package/webpxmux) v0.0.2** - Animated WebP encoding
+
+### Command-Line Tools (for shell scripts)
+- **[FFmpeg](https://ffmpeg.org/)** - Video processing and encoding
+- **[ffprobe](https://ffmpeg.org/ffprobe.html)** - Media file analysis (part of FFmpeg)
+- **[webpmux](https://developers.google.com/speed/webp/docs/webpmux)** - WebP animation tool (part of [libwebp](https://developers.google.com/speed/webp))
 
 ## Features
 
-- **Real-time Preview**: See the chroma key effect applied in real-time as you adjust settings
-- **Multiple Detection Modes**:
-  - **Default Green Screen Detection**: Automatically detects and removes green backgrounds
-  - **Custom Color Selection**: Pick any color from the video to remove (supports green, blue, red, or any custom color)
-- **Adjustable Settings**:
-  - Color threshold/sensitivity
-  - Saturation threshold
-  - Edge softness/smoothing
-- **Multiple Export Formats**:
-  - **Frame-by-Frame (WebP)**: Export as a ZIP file containing individual WebP frames with transparency
-  - **Animated Video (WebM)**: Export as WebM video with VP9 codec supporting alpha transparency
-  - **Animated GIF**: Export as GIF with transparency support
-- **Video Controls**:
-  - Play/pause
-  - Seek bar with time display
-  - Mute/unmute
-  - Repeat/loop
-- **Preview Page**: Test exported files with transparency on a colored background
+- Real-time chroma key preview
+- Multiple color detection modes (green, magenta, cyan, custom, region selection)
+- Export formats: WebP frames, PNG frames, WebM, GIF, Animated WebP
+- Adjustable settings: color threshold, saturation, edge smoothing
+- Video persistence: remembers last loaded video path
 
-## How to Use
+## Browser Support
 
-1. **Load a Video**: Click the folder icon to select a video file (or the tool will try to load `input.mov` if present)
-2. **Choose Detection Mode**:
-   - **Default**: Automatically detects green screens
-   - **Custom**: Click "Pick Color" and then click on the video to select the color to remove
-3. **Adjust Settings**: Use the sliders to fine-tune the chroma key effect:
-   - **Color Threshold**: How sensitive the color detection is
-   - **Saturation Threshold**: Minimum color intensity required (filters out gray pixels)
-   - **Smoothness**: Edge smoothing for better blending
-4. **Export**: Click the export button and choose:
-   - **FPS**: Frames per second (10, 15, 24, 30, or 60)
-   - **Format**: WebP frames, WebM video, or GIF
-5. **Preview**: Use the preview button to view your exported file with transparency
-
-## Technical Details
-
-- Uses HTML5 Canvas for real-time chroma key processing
-- Supports HSV (Hue, Saturation, Value) color space for better color matching
-- Includes spill suppression to reduce color contamination on edges
-- WebM export uses MediaRecorder API with VP9 codec for alpha channel support
-- GIF export uses gif.js library with 1-bit transparency support
-
-## Browser Compatibility
-
-- Modern browsers with HTML5 Canvas and MediaRecorder support
-- Chrome, Firefox, Edge, Safari (latest versions)
-- WebM export requires VP9 codec support
-- GIF export works in all modern browsers
-
-## File Structure
-
-- `index.html`: Main application with video player and chroma key controls
-- `preview.html`: Preview page for testing exported files with transparency
-- `input.mov`: Sample video file (optional)
-
-## Notes
-
-- For best results, use videos with consistent lighting and a solid color background
-- Green screen backgrounds work best, but the tool supports any solid color
-- Higher FPS exports result in larger file sizes but smoother animations
-- WebM format provides the best quality with full alpha channel support
-- GIF format has 1-bit transparency (fully opaque or fully transparent pixels)
+Modern browsers with HTML5 Canvas support. WebM export requires VP9 codec support (Chrome, Firefox, Edge).

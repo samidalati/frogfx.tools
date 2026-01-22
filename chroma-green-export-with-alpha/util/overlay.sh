@@ -320,9 +320,7 @@ if [ -n "$BUCKET_NAME" ]; then
     # Upload video (suppress verbose output)
     VIDEO_URL=$("$UPLOAD_SCRIPT" "$OUTPUT" "$BUCKET_NAME" "$S3_VIDEO_PATH" "video/webm" 2>/dev/null | tr -d '\n\r')
     
-    # Get video info for template
-    VIDEO_WIDTH=$(ffprobe -v error -select_streams v:0 -show_entries stream=width -of default=noprint_wrappers=1:nokey=1 "$OUTPUT" 2>/dev/null)
-    VIDEO_HEIGHT=$(ffprobe -v error -select_streams v:0 -show_entries stream=height -of default=noprint_wrappers=1:nokey=1 "$OUTPUT" 2>/dev/null)
+    # Get video info for template (FPS and duration still from ffprobe, resolution from browser)
     VIDEO_FPS_RATE=$(ffprobe -v error -select_streams v:0 -show_entries stream=r_frame_rate -of default=noprint_wrappers=1:nokey=1 "$OUTPUT" 2>/dev/null)
     
     # Calculate FPS from rate
@@ -374,18 +372,43 @@ if [ -n "$BUCKET_NAME" ]; then
     # Escape VIDEO_URL for sed
     ESCAPED_VIDEO_URL=$(printf '%s\n' "$VIDEO_URL" | sed 's/[[\.*^$()+?{|]/\\&/g')
     
+    # Add JavaScript to detect resolution from video element
+    RESOLUTION_SCRIPT='<script>
+        function updateResolution() {
+            const video = document.querySelector("video");
+            const resolutionElement = document.querySelector(".media-info-row:nth-child(2) .media-info-value");
+            if (video && resolutionElement) {
+                const updateRes = () => {
+                    if (video.videoWidth > 0 && video.videoHeight > 0) {
+                        resolutionElement.textContent = video.videoWidth + "x" + video.videoHeight;
+                    }
+                };
+                if (video.readyState >= 2) {
+                    updateRes();
+                } else {
+                    video.addEventListener("loadedmetadata", updateRes, { once: true });
+                }
+            }
+        }
+        if (document.readyState === "loading") {
+            document.addEventListener("DOMContentLoaded", updateResolution);
+        } else {
+            updateResolution();
+        }
+    </script>'
+    
     # Create temporary HTML file
     HTML_TEMP=$(mktemp)
     sed -e "s|{{TITLE}}|Video Overlay Preview|g" \
         -e "s|{{DESCRIPTION}}|Video with alpha channel overlaid on background image. If the video has alpha, you should see the checkered background through transparent areas|g" \
         -e "s|{{MEDIA_ELEMENT}}|<video src=\"${ESCAPED_VIDEO_URL}\" autoplay loop muted playsinline controls></video>|g" \
         -e "s|{{FILE_TYPE}}|WebM|g" \
-        -e "s|{{RESOLUTION}}|${VIDEO_WIDTH}x${VIDEO_HEIGHT}|g" \
+        -e "s|{{RESOLUTION}}|Detecting...|g" \
         -e "s|{{FPS}}|${DISPLAY_FPS}|g" \
         -e "s|{{ENCODING}}|${ENCODING_DISPLAY}|g" \
         -e "s|{{DURATION}}|${DURATION_DISPLAY}|g" \
         -e "s|{{MEDIA_URL}}|${ESCAPED_VIDEO_URL}|g" \
-        -e "s|{{SCRIPT_CONTENT}}||g" \
+        -e "s|{{SCRIPT_CONTENT}}|${RESOLUTION_SCRIPT}|g" \
         "$TEMPLATE_PATH" > "$HTML_TEMP"
     
     # Upload HTML preview (suppress verbose output)

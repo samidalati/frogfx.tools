@@ -233,16 +233,8 @@ if [ -n "$BUCKET_NAME" ]; then
     # Upload animated WebP (suppress verbose output)
     WEBP_URL=$("$UPLOAD_SCRIPT" "$OUTPUT" "$BUCKET_NAME" "$S3_WEBP_PATH" "image/webp" 2>/dev/null | tr -d '\n\r')
     
-    # Get WebP info for template (try to get dimensions from first frame)
-    WEBP_WIDTH=$(webpmux -info "$OUTPUT" 2>/dev/null | grep -i "width" | head -1 | awk '{print $2}' || echo "N/A")
-    WEBP_HEIGHT=$(webpmux -info "$OUTPUT" 2>/dev/null | grep -i "height" | head -1 | awk '{print $2}' || echo "N/A")
-    
-    # Format resolution
-    if [ "$WEBP_WIDTH" != "N/A" ] && [ "$WEBP_HEIGHT" != "N/A" ]; then
-        RESOLUTION_DISPLAY="${WEBP_WIDTH}x${WEBP_HEIGHT}"
-    else
-        RESOLUTION_DISPLAY="N/A"
-    fi
+    # Resolution will be detected by JavaScript in the browser
+    RESOLUTION_DISPLAY="Detecting..."
     
     # Calculate duration from frame count and FPS
     if [ -n "$FRAME_COUNT" ] && [ "$FRAME_COUNT" -gt 0 ] && [ -n "$FPS" ]; then
@@ -261,11 +253,28 @@ if [ -n "$BUCKET_NAME" ]; then
     SCRIPT_TEMP=$(mktemp)
     cat > "$SCRIPT_TEMP" <<'SCRIPT_EOF'
     <script>
+        // Function to update resolution display
+        function updateResolution(width, height) {
+            const resolutionElement = document.querySelector('.media-info-row:nth-child(2) .media-info-value');
+            if (resolutionElement && width > 0 && height > 0) {
+                resolutionElement.textContent = width + 'x' + height;
+            }
+        }
+        
         (async function() {
             const canvas = document.getElementById('webpCanvas');
             const ctx = canvas.getContext('2d');
             const img = document.getElementById('webpFallback');
             const webpUrl = '{{WEBP_URL}}';
+            
+            // Try to get resolution from fallback img if canvas isn't ready
+            if (img && img.complete && img.naturalWidth > 0) {
+                updateResolution(img.naturalWidth, img.naturalHeight);
+            } else if (img) {
+                img.onload = function() {
+                    updateResolution(this.naturalWidth, this.naturalHeight);
+                };
+            }
             
             // Check if ImageDecoder API is available (Chrome 94+, Edge 94+)
             if ('ImageDecoder' in window) {
@@ -294,6 +303,9 @@ if [ -n "$BUCKET_NAME" ]; then
                         ctx.drawImage(result.image, 0, 0);
                         console.log('Canvas size set to:', canvas.width, 'x', canvas.height);
                         console.log('First frame drawn');
+                        
+                        // Update resolution display
+                        updateResolution(canvas.width, canvas.height);
                         
                         // Don't rely on frameCount - decode frames sequentially until error
                         console.log('Reported frame count:', decoder.frameCount);
@@ -395,12 +407,30 @@ if [ -n "$BUCKET_NAME" ]; then
                     // Fall back to img element
                     canvas.classList.remove('active');
                     img.classList.remove('fallback-img');
+                    img.src = webpUrl;
+                    img.style.display = 'block';
+                    if (img.complete && img.naturalWidth > 0) {
+                        updateResolution(img.naturalWidth, img.naturalHeight);
+                    } else {
+                        img.onload = function() {
+                            updateResolution(this.naturalWidth, this.naturalHeight);
+                        };
+                    }
                 }
             } else {
                 // ImageDecoder not supported - show warning and use canvas workaround
                 console.warn('ImageDecoder not supported. Animation will loop. Please use Chrome 94+ or Edge 94+ for play-once functionality.');
                 canvas.classList.remove('active');
                 img.classList.remove('fallback-img');
+                img.src = webpUrl;
+                img.style.display = 'block';
+                if (img.complete && img.naturalWidth > 0) {
+                    updateResolution(img.naturalWidth, img.naturalHeight);
+                } else {
+                    img.onload = function() {
+                        updateResolution(this.naturalWidth, this.naturalHeight);
+                    };
+                }
                 
                 // Note: img elements with animated WebP will always loop
                 // This is a browser limitation - ImageDecoder API is required for frame-by-frame control
