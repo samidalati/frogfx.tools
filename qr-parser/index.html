@@ -1,0 +1,339 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Parse QR Scanner &amp; Decoder — FrogFX Tools</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 20px;
+        }
+
+        .container {
+            background: white;
+            border-radius: 12px;
+            padding: 28px 32px 32px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            max-width: 1040px;
+            width: 100%;
+        }
+
+        .back {
+            display: inline-block;
+            margin-bottom: 16px;
+            color: #667eea;
+            text-decoration: none;
+            font-size: 14px;
+            font-weight: 600;
+        }
+
+        .back:hover {
+            text-decoration: underline;
+        }
+
+        h1 {
+            text-align: center;
+            color: #333;
+            margin-bottom: 8px;
+            font-size: clamp(20px, 4vw, 26px);
+        }
+
+        .subtitle {
+            text-align: center;
+            color: #666;
+            margin-bottom: 20px;
+            font-size: 14px;
+            line-height: 1.5;
+        }
+
+        .workspace {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) minmax(220px, 300px);
+            gap: 24px;
+            align-items: start;
+        }
+
+        .workspace-main {
+            min-width: 0;
+        }
+
+        .workspace-side {
+            min-width: 0;
+        }
+
+        @media (max-width: 720px) {
+            .workspace {
+                grid-template-columns: 1fr;
+            }
+
+            .workspace-side .qr-info {
+                position: relative;
+                top: auto;
+                max-height: none;
+            }
+        }
+
+        .drop-zone {
+            border: 2px dashed #ccc;
+            border-radius: 8px;
+            padding: 24px;
+            text-align: center;
+            color: #666;
+            font-size: 14px;
+            margin-bottom: 12px;
+            cursor: pointer;
+            transition: border-color 0.2s ease, background 0.2s ease;
+        }
+
+        .drop-zone:hover,
+        .drop-zone:focus {
+            border-color: #667eea;
+            background: #f8f9ff;
+            outline: none;
+        }
+
+        .drop-zone.dragover {
+            border-color: #667eea;
+            background: #f0f2ff;
+        }
+
+        label[for="output"] {
+            display: block;
+            font-size: 12px;
+            font-weight: 600;
+            color: #333;
+            margin-bottom: 6px;
+        }
+
+        .hint {
+            font-size: 13px;
+            color: #888;
+            margin-bottom: 12px;
+            text-align: center;
+        }
+
+        .preview-wrap {
+            border-radius: 8px;
+            overflow: hidden;
+            background: #f8f9fa;
+            border: 2px solid #e0e0e0;
+            margin-top: 8px;
+            margin-bottom: 12px;
+            min-height: 100px;
+            max-height: 220px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .preview-wrap img {
+            max-width: 100%;
+            max-height: 200px;
+            width: auto;
+            height: auto;
+            object-fit: contain;
+            display: block;
+        }
+
+        .preview-wrap:empty::after {
+            content: 'No image yet';
+            color: #aaa;
+            font-size: 14px;
+        }
+
+        .status {
+            min-height: 22px;
+            font-size: 13px;
+            margin-bottom: 10px;
+            color: #666;
+        }
+
+        .status.error {
+            color: #c0392b;
+        }
+
+        .status.success {
+            color: #27ae60;
+        }
+
+        .qr-info {
+            padding: 14px 16px;
+            background: #f8f9fa;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            font-size: 13px;
+            color: #444;
+            position: sticky;
+            top: 16px;
+            max-height: calc(100vh - 40px);
+            overflow-y: auto;
+        }
+
+        .qr-info-heading {
+            font-size: 12px;
+            font-weight: 600;
+            color: #333;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+            margin-bottom: 10px;
+        }
+
+        .qr-info dl {
+            display: grid;
+            grid-template-columns: auto 1fr;
+            gap: 6px 16px;
+            align-items: baseline;
+        }
+
+        .qr-info dt {
+            color: #888;
+            font-weight: 500;
+        }
+
+        .qr-info dd {
+            margin: 0;
+            color: #333;
+            word-break: break-word;
+        }
+
+        textarea {
+            width: 100%;
+            min-height: 72px;
+            max-height: 180px;
+            padding: 12px;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            font-family: inherit;
+            font-size: 14px;
+            resize: vertical;
+            margin-bottom: 12px;
+            background: #fafafa;
+        }
+
+        textarea:read-only {
+            color: #333;
+        }
+
+        .actions {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .actions .actions-gap {
+            flex: 1;
+            min-width: 8px;
+        }
+
+        .actions .icon-btn {
+            flex: 0 0 auto;
+            width: 44px;
+            height: 44px;
+            padding: 0;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 16px;
+        }
+
+        button {
+            padding: 8px 16px;
+            font-size: 13px;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            background: #667eea;
+            color: white;
+            font-weight: 600;
+            transition: all 0.2s ease;
+        }
+
+        button:hover:not(:disabled) {
+            background: #5568d3;
+            transform: translateY(-1px);
+            box-shadow: 0 2px 8px rgba(102, 126, 234, 0.4);
+        }
+
+        button:active:not(:disabled) {
+            transform: translateY(0);
+        }
+
+        button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: none;
+        }
+
+        input[type="file"] {
+            position: absolute;
+            width: 0;
+            height: 0;
+            opacity: 0;
+            pointer-events: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <a href="../index.html" class="back">← FrogFX Tools</a>
+        <h1>Parse QR Scanner &amp; Decoder</h1>
+        <p class="subtitle">Decode QR codes from a screenshot or photo. Images stay in your browser—nothing is uploaded.</p>
+
+        <div class="workspace">
+            <div class="workspace-main">
+                <div id="dropZone" class="drop-zone" tabindex="0" role="button" aria-label="Choose or drop an image">
+                    <strong>Click to choose an image</strong> or drop a file here
+                </div>
+                <input id="fileInput" type="file" accept="image/*" aria-hidden="true">
+
+                <p class="hint">You can also paste an image from the clipboard (⌘V / Ctrl+V) while this page is focused.</p>
+
+                <div id="previewWrap" class="preview-wrap"></div>
+
+                <div id="status" class="status" aria-live="polite"></div>
+
+                <label for="output">Decoded content</label>
+                <textarea id="output" readonly placeholder="QR text will appear here…" aria-label="Decoded QR content"></textarea>
+
+                <div class="actions">
+                    <button id="btnReset" class="icon-btn" type="button" disabled title="Clear image and result" aria-label="Clear image and result">
+                        <i class="fa-solid fa-arrow-rotate-left" aria-hidden="true"></i>
+                    </button>
+                    <span class="actions-gap" aria-hidden="true"></span>
+                    <button id="btnCopy" class="icon-btn" type="button" disabled title="Copy decoded text" aria-label="Copy decoded text">
+                        <i class="fa-solid fa-copy" aria-hidden="true"></i>
+                    </button>
+                    <button id="btnOpen" class="icon-btn" type="button" disabled title="Open link in new tab" aria-label="Open link in new tab">
+                        <i class="fa-solid fa-up-right-from-square" aria-hidden="true"></i>
+                    </button>
+                </div>
+            </div>
+
+            <aside class="workspace-side" aria-label="QR technical details">
+                <div id="qrInfo" class="qr-info">
+                    <h2 class="qr-info-heading">Details</h2>
+                    <dl id="qrInfoList"></dl>
+                </div>
+            </aside>
+        </div>
+    </div>
+
+    <script src="qr-parser.js"></script>
+</body>
+</html>
